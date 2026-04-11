@@ -14,6 +14,15 @@ import {
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
+export const accountType = pgEnum('account_type', ['SOLO', 'ORGANISATION'])
+
+export const inviteStatus = pgEnum('invite_status', [
+  'PENDING',
+  'ACCEPTED',
+  'EXPIRED',
+  'PENDING_UPGRADE',
+])
+
 export const roleType = pgEnum('role_type', ['VIEWER', 'ANALYST', 'ADMIN'])
 
 export const assessmentStatusType = pgEnum('assessment_status_type', [
@@ -102,7 +111,12 @@ export const organisations = pgTable('organisations', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
   slug: varchar('slug', { length: 100 }).notNull().unique(),
+  accountType: accountType('account_type').notNull().default('SOLO'),
+  logoUrl: varchar('logo_url', { length: 500 }),
+  brandColor: varchar('brand_color', { length: 7 }),
+  memberLimit: smallint('member_limit').notNull().default(5),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 })
 
@@ -268,4 +282,19 @@ export const certAlerts = pgTable('cert_alerts', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   uniqueCertAlertDay: unique().on(table.certId, table.alertType),
+}))
+
+// 12. invite_tokens
+export const inviteTokens = pgTable('invite_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organisations.id),
+  token: varchar('token', { length: 64 }).notNull(),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  usedBy: uuid('used_by').references(() => users.id),
+  status: inviteStatus('status').notNull().default('PENDING'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueToken: unique().on(table.token),
 }))
