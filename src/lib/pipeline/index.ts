@@ -59,7 +59,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
 
   // Phase A — parallel
   const [gleif, sanctions, news, trustPortals, hibp] = await Promise.all([
-    fetchGleif(vendorName),
+    fetchGleif(vendorName, ch.company_number || undefined),
     screenSanctions(vendorName, officerNames),
     fetchNews(vendorName),
     fetchTrustPortals(ch.company_name || vendorName, website),

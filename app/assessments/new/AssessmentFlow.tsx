@@ -59,6 +59,8 @@ export default function AssessmentFlow() {
   } | null>(null)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const skipSearchRef = useRef(false)
 
   const search = useCallback(async (q: string) => {
     if (!q.trim() || q.length < 2) {
@@ -66,27 +68,40 @@ export default function AssessmentFlow() {
       setShowDropdown(false)
       return
     }
+    // Cancel any in-flight request so stale results never overwrite newer ones
+    searchAbortRef.current?.abort()
+    searchAbortRef.current = new AbortController()
+    const signal = searchAbortRef.current.signal
     setSearching(true)
     try {
-      const res = await fetch(`/api/companies-house/search?q=${encodeURIComponent(q)}`)
+      const res = await fetch(`/api/companies-house/search?q=${encodeURIComponent(q)}`, { signal })
       if (!res.ok) return
       const data = await res.json() as { items?: ChResult[] }
       setResults(data.items ?? [])
       setShowDropdown(true)
-    } catch {
-      // ignore
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
+      // ignore other errors
     } finally {
       setSearching(false)
     }
   }, [])
 
   useEffect(() => {
+    // Selecting a company updates `query` but must not re-trigger a search
+    if (skipSearchRef.current) {
+      skipSearchRef.current = false
+      return
+    }
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     debounceTimer.current = setTimeout(() => search(query), 300)
     return () => { if (debounceTimer.current) clearTimeout(debounceTimer.current) }
   }, [query, search])
 
   function selectCompany(result: ChResult) {
+    // Suppress the useEffect search that would fire because query is about to change
+    skipSearchRef.current = true
+    searchAbortRef.current?.abort()
     setSelected(result)
     setQuery(result.company_name)
     setShowDropdown(false)

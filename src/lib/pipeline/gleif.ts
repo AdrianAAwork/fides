@@ -20,40 +20,51 @@ async function gleifFetch(path: string): Promise<unknown> {
   }
 }
 
-export async function fetchGleif(vendorName: string): Promise<GleifData> {
+export async function fetchGleif(vendorName: string, companiesHouseNumber?: string): Promise<GleifData> {
   try {
-    // Step 1 — fuzzy name search via autocompletions (fuzzycompanyquery was removed)
-    const searchPath = `/autocompletions?field=fulltext&q=${encodeURIComponent(vendorName)}&page%5Bsize%5D=5`
-    const searchRes = await gleifFetch(searchPath)
-    const searchData = searchRes as {
-      data?: Array<{
-        attributes?: { value?: string }
-        relationships?: {
-          'lei-records'?: {
-            data?: { id?: string }
-          }
-        }
-      }>
+    let lei: string | undefined
+
+    // Step 1a — if we have a CH number, try a direct registry-number lookup first.
+    // This avoids name-matching ambiguity (e.g. benefit trusts vs the main entity).
+    if (companiesHouseNumber) {
+      const regPath = `/lei-records?filter%5Bentity.registeredAs%5D=${encodeURIComponent(companiesHouseNumber)}&filter%5Bentity.jurisdiction%5D=GB&page%5Bsize%5D=1`
+      const regRes = await gleifFetch(regPath)
+      const regData = regRes as { data?: Array<{ id?: string }> }
+      lei = regData.data?.[0]?.id
+      if (lei) {
+        console.log('[pipeline:gleif] matched by registeredAs', companiesHouseNumber, '→ LEI', lei)
+      }
     }
 
-    // Some results lack the lei-records relationship (e.g. shell/placeholder entries).
-    // Iterate to find the first result that actually carries a LEI.
-    const results = searchData.data ?? []
-    if (results.length === 0) {
-      console.log('[pipeline:gleif] no autocomplete results for:', vendorName)
-      return {}
-    }
+    // Step 1b — fall back to autocomplete name search
+    if (!lei) {
+      const searchPath = `/autocompletions?field=fulltext&q=${encodeURIComponent(vendorName)}&page%5Bsize%5D=5`
+      const searchRes = await gleifFetch(searchPath)
+      const searchData = searchRes as {
+        data?: Array<{
+          attributes?: { value?: string }
+          relationships?: { 'lei-records'?: { data?: { id?: string } } }
+        }>
+      }
 
-    const match = results.find((r) => r.relationships?.['lei-records']?.data?.id)
-    if (!match) {
-      console.log(
-        '[pipeline:gleif] none of the', results.length, 'results have a LEI relationship for:', vendorName,
-        '— values:', results.map((r) => r.attributes?.value).join(' | ')
-      )
-      return {}
-    }
+      const results = searchData.data ?? []
+      if (results.length === 0) {
+        console.log('[pipeline:gleif] no autocomplete results for:', vendorName)
+        return {}
+      }
 
-    const lei = match.relationships!['lei-records']!.data!.id!
+      const match = results.find((r) => r.relationships?.['lei-records']?.data?.id)
+      if (!match) {
+        console.log(
+          '[pipeline:gleif] none of the', results.length, 'results have a LEI relationship for:', vendorName,
+          '— values:', results.map((r) => r.attributes?.value).join(' | ')
+        )
+        return {}
+      }
+
+      lei = match.relationships!['lei-records']!.data!.id!
+      console.log('[pipeline:gleif] matched by name autocomplete → LEI', lei, 'entry:', match.attributes?.value)
+    }
 
     console.log('[pipeline:gleif] found LEI', lei, 'for:', vendorName)
 
