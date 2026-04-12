@@ -4,6 +4,7 @@ import { getDbContext } from '@/src/lib/session'
 import { db } from '@/src/db'
 import { assessments, assessmentScores, users } from '@/src/db/schema'
 import { and, eq, isNull } from 'drizzle-orm'
+import DimensionCard from './DimensionCard'
 
 const TIER_COLORS: Record<string, string> = {
   LOW: 'bg-green-100 text-green-800',
@@ -167,32 +168,36 @@ export default async function AssessmentDetailPage({
 
         {/* Dimension scores */}
         <div>
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Dimension scores</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <h2 className="text-base font-semibold text-gray-900 mb-4">
+            Dimension scores
+            <span className="ml-2 text-xs font-normal text-gray-400">Click a card to see how the score was calculated</span>
+          </h2>
+          <div className="space-y-3">
             {Object.entries(DIMENSION_LABELS).map(([dim, label]) => {
               const score = scores.find((s) => s.dimension === dim)
-              return (
-                <div key={dim} className="bg-white rounded-lg shadow p-5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-gray-700">{label}</p>
-                    <span className="text-xs text-gray-400">weight {DIMENSION_WEIGHTS[dim]}%</span>
+              if (!score) {
+                return (
+                  <div key={dim} className="bg-white rounded-lg shadow px-5 py-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700">{label}</span>
+                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{DIMENSION_WEIGHTS[dim]}%</span>
+                    </div>
+                    <p className="text-sm text-gray-400 mt-2">No data available</p>
                   </div>
-                  {score ? (
-                    <>
-                      <p className={`text-3xl font-bold ${scoreColor(score.finalScore)}`}>
-                        {score.finalScore}
-                        <span className="text-sm font-normal text-gray-400">/100</span>
-                      </p>
-                      {score.fetchedAt && (
-                        <p className="text-xs text-gray-400">
-                          Fetched {new Date(score.fetchedAt).toLocaleString('en-GB')}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-gray-400">No data</p>
-                  )}
-                </div>
+                )
+              }
+              return (
+                <DimensionCard
+                  key={dim}
+                  dimension={dim}
+                  label={label}
+                  weight={DIMENSION_WEIGHTS[dim]}
+                  finalScore={score.finalScore}
+                  isOverridden={score.isOverridden}
+                  overrideReason={score.overrideReason}
+                  sourceData={score.sourceData as Record<string, unknown> | null}
+                  fetchedAt={score.fetchedAt}
+                />
               )
             })}
           </div>
