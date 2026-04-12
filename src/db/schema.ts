@@ -10,6 +10,7 @@ import {
   date,
   jsonb,
   unique,
+  index,
 } from 'drizzle-orm/pg-core'
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -104,6 +105,10 @@ export const certAlertType = pgEnum('cert_alert_type', [
   'STALE',
 ])
 
+export const sanctionSource = pgEnum('sanction_source', ['OFSI', 'OFAC', 'EU'])
+
+export const sanctionType = pgEnum('sanction_type', ['individual', 'entity'])
+
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
 // 1. organisations
@@ -151,6 +156,8 @@ export const assessments = pgTable('assessments', {
   riskTier: riskTierType('risk_tier'),
   riskTierOverride: boolean('risk_tier_override').notNull().default(false),
   riskTierOverrideReason: text('risk_tier_override_reason'),
+  overallScore: smallint('overall_score'),
+  execSummaryJson: jsonb('exec_summary_json'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -297,4 +304,20 @@ export const inviteTokens = pgTable('invite_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   uniqueToken: unique().on(table.token),
+}))
+
+// 13. sanctions_entries
+export const sanctionsEntries = pgTable('sanctions_entries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 500 }).notNull(),
+  aliases: jsonb('aliases').notNull().default('[]'),
+  source: sanctionSource('source').notNull(),
+  type: sanctionType('type').notNull(),
+  referenceNumber: varchar('reference_number', { length: 100 }),
+  listedAt: date('listed_at'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nameIdx: index('sanctions_name_idx').on(table.name),
+  sourceIdx: index('sanctions_source_idx').on(table.source),
 }))

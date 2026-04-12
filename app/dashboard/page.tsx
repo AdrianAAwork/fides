@@ -3,10 +3,10 @@ import { redirect } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
 import { db } from '@/src/db'
-import { users, inviteTokens } from '@/src/db/schema'
-import { and, count, eq, isNull } from 'drizzle-orm'
+import { users, inviteTokens, assessments } from '@/src/db/schema'
+import { and, count, eq, isNull, desc } from 'drizzle-orm'
 import { getDbContext } from '@/src/lib/session'
-import { CLAIMS } from '@/src/lib/auth'
+import { CLAIMS, hasRole } from '@/src/lib/auth'
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -54,6 +54,22 @@ export default async function DashboardPage({
   const showPendingBanner = !!(pendingUpgrade || pending === '1')
 
   const isSolo = org.accountType === 'SOLO'
+
+  const recentAssessments = await db
+    .select({
+      id: assessments.id,
+      vendorName: assessments.vendorName,
+      riskTier: assessments.riskTier,
+      overallScore: assessments.overallScore,
+      assessmentStatus: assessments.assessmentStatus,
+      createdAt: assessments.createdAt,
+    })
+    .from(assessments)
+    .where(and(eq(assessments.orgId, org.id), isNull(assessments.deletedAt)))
+    .orderBy(desc(assessments.createdAt))
+    .limit(3)
+
+  const canCreateAssessment = hasRole(user.role, 'ANALYST')
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -146,6 +162,63 @@ export default async function DashboardPage({
           >
             Profile settings →
           </Link>
+        </div>
+
+        {/* Assessments section */}
+        <div className="bg-white rounded-lg shadow p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">Assessments</h2>
+            <div className="flex items-center gap-3">
+              <Link href="/assessments" className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+                View all →
+              </Link>
+              {canCreateAssessment && (
+                <Link
+                  href="/assessments/new"
+                  className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+                >
+                  New assessment
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {recentAssessments.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              No assessments yet.{' '}
+              {canCreateAssessment && (
+                <Link href="/assessments/new" className="text-indigo-600 hover:text-indigo-800">
+                  Start your first assessment →
+                </Link>
+              )}
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {recentAssessments.map((a) => (
+                <div key={a.id} className="flex items-center justify-between py-3">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{a.vendorName}</p>
+                    <p className="text-xs text-gray-400">{new Date(a.createdAt).toLocaleDateString('en-GB')}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {a.riskTier && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        a.riskTier === 'LOW' ? 'bg-green-100 text-green-800'
+                        : a.riskTier === 'MEDIUM' ? 'bg-amber-100 text-amber-800'
+                        : a.riskTier === 'HIGH' ? 'bg-orange-100 text-orange-800'
+                        : 'bg-red-100 text-red-800'
+                      }`}>
+                        {a.riskTier}
+                      </span>
+                    )}
+                    <Link href={`/assessments/${a.id}`} className="text-sm text-indigo-600 hover:text-indigo-800">
+                      View
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     </div>
