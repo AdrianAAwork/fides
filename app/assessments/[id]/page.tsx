@@ -3,10 +3,12 @@ import Link from 'next/link'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import { db } from '@/src/db'
-import { assessments, assessmentScores, users } from '@/src/db/schema'
-import { and, eq, isNull } from 'drizzle-orm'
+import { assessments, assessmentScores, users, doraClassification, auditLog } from '@/src/db/schema'
+import { and, eq, isNull, desc } from 'drizzle-orm'
 import DimensionCard from './DimensionCard'
 import AssessmentActions from './AssessmentActions'
+import DoraCard from './DoraCard'
+import type { DoraRow } from './DoraCard'
 
 const TIER_COLORS: Record<string, string> = {
   LOW: 'bg-green-100 text-green-800',
@@ -68,6 +70,47 @@ export default async function AssessmentDetailPage({
     .select()
     .from(assessmentScores)
     .where(eq(assessmentScores.assessmentId, id))
+
+  const [doraRow] = await db
+    .select()
+    .from(doraClassification)
+    .where(eq(doraClassification.assessmentId, id))
+    .limit(1)
+
+  const auditEntries = await db
+    .select({
+      id: auditLog.id,
+      actionType: auditLog.actionType,
+      oldValue: auditLog.oldValue,
+      newValue: auditLog.newValue,
+      reason: auditLog.reason,
+      createdAt: auditLog.createdAt,
+      userEmail: users.email,
+      userDisplayName: users.displayName,
+    })
+    .from(auditLog)
+    .leftJoin(users, eq(auditLog.userId, users.id))
+    .where(and(eq(auditLog.assessmentId, id), eq(auditLog.orgId, ctx.org.id)))
+    .orderBy(desc(auditLog.createdAt))
+
+  const canOverride = hasRole(ctx.user.role, 'ANALYST')
+  const canClassify = hasRole(ctx.user.role, 'ANALYST')
+  const canDoraOverride = hasRole(ctx.user.role, 'ADMIN')
+
+  const doraExisting: DoraRow | null = doraRow
+    ? {
+        serviceType: doraRow.serviceType,
+        processesPersonalData: doraRow.processesPersonalData,
+        lossImpactOver2hrs: doraRow.lossImpactOver2hrs,
+        substituteAvailable: doraRow.substituteAvailable,
+        regulatedActivitySubstitute: doraRow.regulatedActivitySubstitute,
+        classification: doraRow.classification,
+        classificationJustification: doraRow.classificationJustification,
+        isOverridden: doraRow.isOverridden,
+        overrideReason: doraRow.overrideReason,
+        overriddenAt: doraRow.overriddenAt,
+      }
+    : null
 
   const execSummary = assessment.execSummaryJson as {
     summary?: string
@@ -145,7 +188,17 @@ export default async function AssessmentDetailPage({
           </div>
           <div>
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">DORA classification</p>
-            <p className="text-sm text-gray-400 italic">Pending (Phase 6)</p>
+            {doraRow ? (
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                doraRow.classification === 'CRITICAL' ? 'bg-red-100 text-red-800 border-red-200'
+                : doraRow.classification === 'IMPORTANT' ? 'bg-amber-100 text-amber-800 border-amber-200'
+                : 'bg-green-100 text-green-800 border-green-200'
+              }`}>
+                {doraRow.classification}
+              </span>
+            ) : (
+              <p className="text-sm text-gray-400 italic">Not classified</p>
+            )}
           </div>
         </div>
 
@@ -203,16 +256,99 @@ export default async function AssessmentDetailPage({
                   label={label}
                   weight={DIMENSION_WEIGHTS[dim]}
                   finalScore={score.finalScore}
+                  rawScore={score.rawScore}
                   isOverridden={score.isOverridden}
                   overrideReason={score.overrideReason}
+                  overriddenAt={score.overriddenAt}
                   sourceData={score.sourceData as Record<string, unknown> | null}
                   fetchedAt={score.fetchedAt}
+                  scoreId={score.id}
+                  assessmentId={id}
+                  canOverride={canOverride}
                 />
               )
             })}
           </div>
         </div>
+
+        {/* DORA / FCA classification */}
+        <div>
+          <h2 className="text-base font-semibold text-gray-900 mb-4">DORA / FCA classification</h2>
+          <DoraCard
+            assessmentId={id}
+            existing={doraExisting}
+            canClassify={canClassify}
+            canOverride={canDoraOverride}
+          />
+        </div>
+
+        {/* Audit trail */}
+        {auditEntries.length > 0 && (
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Audit trail</h2>
+            <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
+              {auditEntries.map((entry) => {
+                const performer = entry.userDisplayName ?? entry.userEmail ?? 'System'
+                const actionLabel = ACTION_LABELS[entry.actionType] ?? entry.actionType
+                const description = buildAuditDescription(entry)
+                return (
+                  <div key={entry.id} className="px-5 py-3 flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800">{actionLabel}</p>
+                      {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
+                      <p className="text-xs text-gray-400 mt-0.5">{performer}</p>
+                    </div>
+                    <p className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">
+                      {new Date(entry.createdAt).toLocaleString('en-GB')}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )
+}
+
+// ── Audit helpers ─────────────────────────────────────────────────────────────
+
+const ACTION_LABELS: Record<string, string> = {
+  SCORE_OVERRIDDEN: 'Score adjusted',
+  CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
+  CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',
+}
+
+function buildAuditDescription(entry: {
+  actionType: string
+  oldValue: unknown
+  newValue: unknown
+  reason: string | null
+}): string {
+  const oldVal = entry.oldValue as Record<string, unknown> | null | undefined
+  const newVal = entry.newValue as Record<string, unknown> | null | undefined
+  if (entry.actionType === 'SCORE_OVERRIDDEN') {
+    const dim = (newVal?.dimension as string | undefined) ?? ''
+    const oldScore = oldVal?.score
+    const newScore = newVal?.score
+    const parts: string[] = []
+    if (dim) parts.push(dim.replace(/_/g, ' ').toLowerCase())
+    if (oldScore != null && newScore != null) parts.push(`${oldScore} → ${newScore}`)
+    if (entry.reason) parts.push(entry.reason)
+    return parts.join(' · ')
+  }
+  if (entry.actionType === 'CLASSIFICATION_CONFIRMED') {
+    const cls = (newVal?.classification as string | undefined) ?? ''
+    return cls ? `Classified as ${cls}` : ''
+  }
+  if (entry.actionType === 'CLASSIFICATION_OVERRIDDEN') {
+    const oldCls = (oldVal?.classification as string | undefined) ?? ''
+    const newCls = (newVal?.classification as string | undefined) ?? ''
+    const parts: string[] = []
+    if (oldCls && newCls) parts.push(`${oldCls} → ${newCls}`)
+    if (entry.reason) parts.push(entry.reason)
+    return parts.join(' · ')
+  }
+  return ''
 }

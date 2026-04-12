@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { FATF_GREY_LIST, FATF_BLACK_LIST } from '@/src/lib/fatf'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -10,10 +11,15 @@ interface Props {
   label: string
   weight: number
   finalScore: number
+  rawScore: number
   isOverridden: boolean
   overrideReason: string | null
+  overriddenAt: Date | string | null
   sourceData: Record<string, unknown> | null
   fetchedAt: Date | string | null
+  scoreId: string
+  assessmentId: string
+  canOverride: boolean
 }
 
 type StepType = 'base' | 'deduction' | 'positive' | 'info' | 'warning'
@@ -444,7 +450,7 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
 
   if (status === 'not_checked') {
     steps.push({
-      text: `No recent news articles were found${articlesCount === 0 ? '' : ` (${articlesCount ?? 0} articles retrieved)`}. A neutral score of 70 was applied.`,
+      text: `No risk-relevant headlines identified. A neutral-positive score has been applied.${articlesCount != null && articlesCount > 0 ? ` (${articlesCount} articles retrieved)` : ''}`,
       type: 'info',
       action: 'Search Google News or industry trade press manually for recent coverage of this vendor.',
     })
@@ -455,7 +461,7 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
   if (status === 'summary_unavailable') {
     const count = articlesCount ?? 0
     steps.push({
-      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable. A neutral score of 70 was applied.`,
+      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable. A neutral-positive score of 80 was applied.`,
       type: 'info',
       action: 'Review the news headlines manually and re-run the assessment if you need an AI sentiment score.',
     })
@@ -463,7 +469,7 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
     return steps
   }
 
-  const sentimentScores: Record<string, number> = { positive: 90, neutral: 70, mixed: 50, negative: 20 }
+  const sentimentScores: Record<string, number> = { positive: 90, neutral: 80, mixed: 50, negative: 20 }
   if (sentiment) {
     const t: StepType = sentiment === 'negative' ? 'deduction' : sentiment === 'positive' ? 'positive' : 'info'
     const count = articlesCount != null ? ` (${articlesCount} article${articlesCount !== 1 ? 's' : ''} analysed)` : ''
@@ -526,9 +532,49 @@ function stepTextColor(type: StepType): string {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DimensionCard({
-  dimension, label, weight, finalScore, isOverridden, overrideReason, sourceData, fetchedAt,
+  dimension, label, weight, finalScore, rawScore, isOverridden, overrideReason, overriddenAt,
+  sourceData, fetchedAt, scoreId, assessmentId, canOverride,
 }: Props) {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const [newScoreVal, setNewScoreVal] = useState(String(finalScore))
+  const [overrideReason2, setOverrideReason2] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [overrideError, setOverrideError] = useState<string | null>(null)
+
+  async function handleOverrideSave() {
+    const ns = Number(newScoreVal)
+    if (!Number.isInteger(ns) || ns < 0 || ns > 100) {
+      setOverrideError('Score must be a whole number between 0 and 100.')
+      return
+    }
+    if (overrideReason2.trim().length < 10) {
+      setOverrideError('Reason must be at least 10 characters.')
+      return
+    }
+    setOverrideError(null)
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/scores/${dimension}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newScore: ns, reason: overrideReason2.trim() }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setOverrideError((data as { error?: string }).error ?? 'Failed to save override.')
+        return
+      }
+      setOverrideOpen(false)
+      setOverrideReason2('')
+      router.refresh()
+    } catch {
+      setOverrideError('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
   const sd      = sourceData ?? {}
   const source  = SOURCE_LABELS[dimension] ?? 'Unknown'
   const fetched = fetchedAt ? new Date(fetchedAt).toLocaleString('en-GB') : null
@@ -562,20 +608,33 @@ export default function DimensionCard({
               {weight}%
             </span>
           </div>
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <div className="flex items-center gap-2">
+            {canOverride && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setOverrideOpen(o => !o); setOverrideError(null) }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setOverrideOpen(o => !o); setOverrideError(null) } }}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50 transition-colors cursor-pointer"
+              >
+                Adjust score
+              </span>
+            )}
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
 
         <div className="flex items-baseline gap-2 mt-3">
           <span className={`text-3xl font-bold ${scoreColor(finalScore)}`}>{finalScore}</span>
           <span className="text-sm text-gray-400">/100</span>
           {isOverridden && (
-            <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-              Overridden
+            <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
+              Manually adjusted
             </span>
           )}
         </div>
@@ -585,15 +644,68 @@ export default function DimensionCard({
         )}
       </button>
 
+      {/* ── Override form ──────────────────────────────────────────────────── */}
+      {overrideOpen && (
+        <div className="border-t border-indigo-100 bg-indigo-50 px-5 py-4 space-y-3">
+          <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Adjust score</p>
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-gray-700 w-32 flex-shrink-0">New score (0–100)</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={newScoreVal}
+              onChange={(e) => setNewScoreVal(e.target.value)}
+              className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            />
+            <span className="text-xs text-gray-400">Current: {finalScore}</span>
+          </div>
+          <div>
+            <label className="text-xs text-gray-700 block mb-1">Reason (required, min 10 characters)</label>
+            <textarea
+              rows={2}
+              value={overrideReason2}
+              onChange={(e) => setOverrideReason2(e.target.value)}
+              placeholder="Explain why you are adjusting this score…"
+              className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none"
+            />
+          </div>
+          {overrideError && (
+            <p className="text-xs text-red-600">{overrideError}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleOverrideSave}
+              disabled={saving}
+              className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => { setOverrideOpen(false); setOverrideError(null); setOverrideReason2('') }}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Expanded panel ─────────────────────────────────────────────────── */}
       {open && (
         <div className="border-t border-gray-100 px-5 py-5 space-y-5">
 
           {/* Override banner */}
-          {isOverridden && overrideReason && (
-            <div className="rounded-md bg-amber-50 border border-amber-100 px-3 py-2 text-xs">
-              <p className="font-medium text-amber-700">Score overridden by analyst</p>
-              <p className="text-amber-600 mt-0.5">{overrideReason}</p>
+          {isOverridden && (
+            <div className="rounded-md bg-purple-50 border border-purple-100 px-3 py-2 text-xs space-y-0.5">
+              <p className="font-medium text-purple-700">Manually adjusted</p>
+              <p className="text-purple-600">Original system score: {rawScore}</p>
+              {overrideReason && <p className="text-purple-600">{overrideReason}</p>}
+              {overriddenAt && (
+                <p className="text-purple-400">
+                  {new Date(overriddenAt).toLocaleString('en-GB')}
+                </p>
+              )}
             </div>
           )}
 

@@ -189,14 +189,14 @@ function scoreNewsSentiment(sentiment: NewsSentimentResult): DimensionScore {
   let score: number
   switch (sentiment.sentiment) {
     case 'positive': score = 90; break
-    case 'neutral': score = 70; break
+    case 'neutral': score = 80; break
     case 'mixed': score = 50; break
     case 'negative': score = 20; break
-    default: score = 70
+    default: score = 80
   }
 
   if (sentiment.status === 'not_checked' || sentiment.status === 'summary_unavailable') {
-    score = 70
+    score = 80
   }
 
   return {
