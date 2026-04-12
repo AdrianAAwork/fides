@@ -6,6 +6,9 @@ import { db } from '@/src/db'
 import { assessments, users } from '@/src/db/schema'
 import { and, eq, isNull, desc } from 'drizzle-orm'
 
+// Pipeline makes multiple external API calls + 3 Claude calls — needs extended timeout
+export const maxDuration = 300
+
 export async function POST(req: Request) {
   const ctx = await getDbContext()
   if (!ctx) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
@@ -13,9 +16,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
-  const body = await req.json()
+  let body: Record<string, unknown>
+  try {
+    body = await req.json()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[POST /api/assessments] failed to parse request body:', msg)
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  console.log('[POST /api/assessments] body received:', JSON.stringify(body))
+
   const vendorName = typeof body.vendorName === 'string' ? body.vendorName.trim() : ''
-  if (!vendorName) return NextResponse.json({ error: 'vendorName is required' }, { status: 400 })
+  if (!vendorName) {
+    console.error('[POST /api/assessments] vendorName missing or empty. body.vendorName:', body.vendorName)
+    return NextResponse.json({ error: 'vendorName is required' }, { status: 400 })
+  }
 
   const companiesHouseNumber =
     typeof body.companiesHouseNumber === 'string' ? body.companiesHouseNumber.trim() : undefined

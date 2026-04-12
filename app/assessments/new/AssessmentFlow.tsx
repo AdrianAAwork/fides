@@ -104,6 +104,15 @@ export default function AssessmentFlow() {
         body: JSON.stringify({ vendorName, companiesHouseNumber }),
       })
 
+      if (!res.ok) {
+        let errMsg = `Server error ${res.status}`
+        try {
+          const errBody = await res.json() as { error?: string }
+          if (errBody.error) errMsg = errBody.error
+        } catch { /* ignore parse failure */ }
+        throw new Error(errMsg)
+      }
+
       if (!res.body) throw new Error('No response body')
 
       const reader = res.body.getReader()
