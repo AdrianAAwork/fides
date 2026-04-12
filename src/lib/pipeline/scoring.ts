@@ -208,6 +208,8 @@ function scoreNewsSentiment(sentiment: NewsSentimentResult): DimensionScore {
       risk_items: sentiment.risk_items,
       summary: sentiment.summary,
       status: sentiment.status,
+      articles_count: sentiment.articlesCount,
+      query_note: sentiment.queryNote,
     },
     fetchedAt: new Date(),
   }

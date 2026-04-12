@@ -88,6 +88,8 @@ export interface NewsArticle {
 
 export interface NewsData {
   articles: NewsArticle[]
+  articlesCount?: number
+  queryNote?: string
   error?: string
 }
 
@@ -144,6 +146,8 @@ export interface NewsSentimentResult {
   risk_items: Array<{ headline: string; risk_type: string }>
   summary: string
   status: 'checked' | 'not_checked' | 'summary_unavailable'
+  articlesCount?: number
+  queryNote?: string
 }
 
 export interface ExecSummaryResult {

@@ -17,7 +17,7 @@ interface Props {
 }
 
 type StepType = 'base' | 'deduction' | 'positive' | 'info' | 'warning'
-interface Step { text: string; type: StepType }
+interface Step { text: string; type: StepType; action?: string }
 
 // ── Lookups ───────────────────────────────────────────────────────────────────
 
@@ -66,14 +66,88 @@ function scoreColor(s: number) {
   return 'text-red-600'
 }
 
+// ── Error categorisation ──────────────────────────────────────────────────────
+
+type ErrorCategory = 'timeout' | 'auth' | 'not_found' | 'rate_limit' | 'server' | 'other'
+
+function categorizeError(err: unknown): ErrorCategory {
+  const msg = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase()
+  if (msg.includes('abort') || msg.includes('timeout') || msg.includes('timed out')) return 'timeout'
+  if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('forbidden')) return 'auth'
+  if (msg.includes('404') || msg.includes('not found')) return 'not_found'
+  if (msg.includes('429') || msg.includes('rate limit') || msg.includes('too many')) return 'rate_limit'
+  if (msg.includes('5') && /→ 5\d\d/.test(msg)) return 'server'
+  return 'other'
+}
+
+const ERROR_LABELS: Record<ErrorCategory, string> = {
+  timeout: 'The request timed out before data could be retrieved.',
+  auth: 'Access was denied — the API key may have expired or lacked permissions.',
+  not_found: 'No record was found for this company.',
+  rate_limit: 'The data source temporarily blocked the request due to usage limits.',
+  server: 'The data source returned a server error.',
+  other: 'Data could not be retrieved due to an unexpected error.',
+}
+
+// ── Portal status helper ──────────────────────────────────────────────────────
+
+function friendlyPortalStatus(meta: {
+  attempted: boolean
+  http_status?: number
+  found: boolean
+  keywords_found?: string[]
+  error?: string | null
+}): { text: string; color: string } {
+  if (!meta.attempted) return { text: 'Not checked', color: 'text-gray-400' }
+  if (meta.found) {
+    const kw = meta.keywords_found?.slice(0, 2).join(', ')
+    return {
+      text: kw ? `Found — ${kw}` : 'Found',
+      color: 'text-green-700 font-medium',
+    }
+  }
+
+  // Not found — determine friendly reason
+  const status = meta.http_status ?? 0
+  const errMsg = (meta.error ?? '').toLowerCase()
+
+  if (errMsg.includes('abort') || errMsg.includes('timeout')) {
+    return { text: 'Could not be reached in time', color: 'text-amber-700' }
+  }
+  if (status === 403 || status === 429 || errMsg.includes('forbidden') || errMsg.includes('blocked')) {
+    return { text: 'Access blocked by portal security', color: 'text-amber-700' }
+  }
+  if (status === 404 || status === 0) {
+    return { text: 'Not listed on this platform', color: 'text-gray-500' }
+  }
+  if (status >= 500) {
+    return { text: 'Platform temporarily unavailable', color: 'text-amber-700' }
+  }
+  return { text: 'Not listed on this platform', color: 'text-gray-500' }
+}
+
 // ── Explanation builders ──────────────────────────────────────────────────────
 
 function explainFinancialHealth(sd: Record<string, unknown>, score: number): Step[] {
   const steps: Step[] = [{ text: 'Started at 100.', type: 'base' }]
 
+  // Was data successfully fetched?
+  if (sd.error) {
+    const cat = categorizeError(sd.error)
+    const reason = ERROR_LABELS[cat]
+    steps.push({
+      text: `Companies House data could not be retrieved. ${reason} This does not reflect on the vendor — the score below is based only on the data that was available.`,
+      type: 'warning',
+      action: 'Visit find-and-update.company-information.service.gov.uk to check filing status manually.',
+    })
+  }
+
   const status = sd.company_status as string | undefined
-  if (status && status !== 'active') {
+  // Only show the status deduction if data was actually fetched (not the 'unknown' fallback from no CH number)
+  if (status && status !== 'active' && status !== 'unknown') {
     steps.push({ text: `Company status is "${status}" (not active): −60`, type: 'deduction' })
+  } else if (status === 'unknown' && !sd.error) {
+    steps.push({ text: 'No Companies House number was provided — company status could not be checked.', type: 'info' })
   } else if (status === 'active') {
     steps.push({ text: 'Company status: active.', type: 'positive' })
   }
@@ -84,11 +158,11 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
   } else if (acc?.next_due) {
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 18)
     if (new Date(acc.next_due) < cutoff) {
-      steps.push({ text: `No accounts filed in last 18 months (next due: ${acc.next_due}): −30`, type: 'deduction' })
+      steps.push({ text: `No accounts filed in the last 18 months (next due: ${acc.next_due}): −30`, type: 'deduction' })
     } else {
       steps.push({ text: `Annual accounts next due: ${acc.next_due}. Up to date.`, type: 'positive' })
     }
-  } else {
+  } else if (!sd.error) {
     steps.push({ text: 'No accounts information available.', type: 'info' })
   }
 
@@ -102,29 +176,59 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
   const gc = sd.going_concern as {
     going_concern?: boolean; status?: string; confidence?: string; summary?: string
   } | undefined
+
   if (gc?.status === 'checked') {
     if (gc.going_concern) {
-      steps.push({ text: `Going concern warning detected (AI confidence: ${gc.confidence}): −30`, type: 'deduction' })
+      steps.push({ text: `Going concern warning detected in accounts (AI confidence: ${gc.confidence}): −30`, type: 'deduction' })
       if (gc.summary) steps.push({ text: `AI note: "${gc.summary}"`, type: 'warning' })
     } else {
-      steps.push({ text: 'No going concern warning found in filing text.', type: 'positive' })
+      steps.push({ text: 'No going concern warning found in the latest filing text.', type: 'positive' })
     }
   } else if (gc?.status === 'not_checked') {
-    steps.push({ text: 'Going concern: filing text not available for AI analysis.', type: 'info' })
+    steps.push({
+      text: 'The most recent filing is in PDF format and could not be read as text, so a going concern check was not performed.',
+      type: 'info',
+      action: 'Download and review the accounts on Companies House to check for auditor going concern notes.',
+    })
   } else if (gc?.status === 'summary_unavailable') {
-    steps.push({ text: 'Going concern: AI analysis was unavailable, skipped.', type: 'info' })
+    steps.push({
+      text: 'AI going concern analysis was temporarily unavailable and was skipped. No deduction was applied.',
+      type: 'info',
+      action: 'Review the auditor\'s report in the latest accounts directly on Companies House.',
+    })
   }
 
-  if (sd.error) steps.push({ text: `Data fetch error: ${sd.error}`, type: 'warning' })
   steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
 function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[] {
-  if (!sd.enabled) {
+  // When HIBP is disabled the scoring sets enabled: false explicitly in sourceData
+  if (sd.enabled === false) {
     return [
-      { text: 'HIBP breach checking is not enabled for this deployment.', type: 'info' },
-      { text: 'A neutral score of 75 was applied.', type: 'info' },
+      {
+        text: 'Breach history checking via Have I Been Pwned is not configured for this deployment. A neutral score of 75 was applied.',
+        type: 'info',
+        action: 'Ask your administrator to enable HIBP integration, or check the vendor domain manually at haveibeenpwned.com.',
+      },
+    ]
+  }
+
+  if (sd.error) {
+    const cat = categorizeError(sd.error)
+    const reason = ERROR_LABELS[cat]
+    let action: string | undefined
+    if (cat === 'timeout') action = 'This is usually transient. Re-run the assessment or check the domain manually at haveibeenpwned.com.'
+    else if (cat === 'auth') action = 'Ask your administrator to verify the HIBP API key in environment settings.'
+    else if (cat === 'rate_limit') action = 'Re-run the assessment after a short wait, or check haveibeenpwned.com manually.'
+    else action = 'Check the vendor domain manually at haveibeenpwned.com.'
+
+    return [
+      {
+        text: `Breach data could not be retrieved. ${reason} A neutral score of 75 was applied — this does not indicate the vendor is clean.`,
+        type: 'warning',
+        action,
+      },
     ]
   }
 
@@ -133,45 +237,78 @@ function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[
   const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 24)
 
   if (breaches.length === 0) {
-    steps.push({ text: 'No breaches found on the domain.', type: 'positive' })
+    steps.push({ text: 'No breaches found on the vendor\'s domain.', type: 'positive' })
   } else {
     for (const b of breaches) {
       const recent = new Date(b.BreachDate) >= cutoff
       const classes = b.DataClasses?.slice(0, 3).join(', ')
       steps.push({
-        text: `"${b.Name}" (${b.BreachDate})${classes ? ` — ${classes}` : ''}: ${recent ? '−25 (within 24 months)' : '−10 (older than 24 months)'}`,
+        text: `"${b.Name}" (${b.BreachDate})${classes ? ` — data types: ${classes}` : ''}: ${recent ? '−25 (within 24 months)' : '−10 (older than 24 months)'}`,
         type: 'deduction',
       })
     }
   }
 
-  if (sd.error) steps.push({ text: `Data fetch error: ${sd.error}`, type: 'warning' })
   steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
 function explainSanctions(sd: Record<string, unknown>): Step[] {
+  const steps: Step[] = []
+
+  if (sd.error) {
+    const cat = categorizeError(sd.error)
+    let action: string
+    if (cat === 'timeout' || cat === 'server') {
+      action = 'Re-run the assessment to retry, or perform a manual check on the OFSI, OFAC, and EU financial sanctions lists.'
+    } else {
+      action = 'Perform a manual sanctions check on the OFSI, OFAC, and EU financial sanctions lists before proceeding.'
+    }
+    return [
+      {
+        text: 'The sanctions database could not be queried. A score of 100 was applied but this result is unreliable.',
+        type: 'warning',
+        action,
+      },
+      {
+        text: 'You must complete a manual sanctions check before proceeding with this vendor.',
+        type: 'warning',
+      },
+    ]
+  }
+
   const screened = (sd.screened as string[]) ?? []
   const matches = (sd.matches as Array<{
     name: string; matchedAgainst: string; similarity: number; level: string; source: string
   }>) ?? []
-  const steps: Step[] = []
 
   steps.push({
-    text: `Screened ${screened.length} name${screened.length !== 1 ? 's' : ''} against OFSI, OFAC, and EU sanctions lists.`,
+    text: `Screened ${screened.length} name${screened.length !== 1 ? 's' : ''} against OFSI, OFAC, and EU financial sanctions lists.`,
     type: 'info',
   })
 
   if (matches.length === 0) {
-    steps.push({ text: 'No matches found. Score: 100.', type: 'positive' })
+    steps.push({ text: 'No matches found across all lists. Score: 100.', type: 'positive' })
   } else {
     const confirmed = matches.filter(m => m.level === 'confirmed')
     const possible  = matches.filter(m => m.level === 'possible')
-    if (confirmed.length) steps.push({ text: `${confirmed.length} confirmed match(es). Score forced to 0. Risk tier overridden to minimum HIGH.`, type: 'deduction' })
-    if (possible.length)  steps.push({ text: `${possible.length} possible match(es). Score set to 40. Risk tier overridden to minimum HIGH.`, type: 'warning' })
+
+    if (confirmed.length) {
+      steps.push({
+        text: `${confirmed.length} confirmed sanctions match${confirmed.length !== 1 ? 'es' : ''}. Score forced to 0.`,
+        type: 'deduction',
+        action: 'This requires immediate escalation to your compliance team. Do not proceed with this vendor without authorisation.',
+      })
+    }
+    if (possible.length) {
+      steps.push({
+        text: `${possible.length} possible sanctions match${possible.length !== 1 ? 'es' : ''} (high name similarity but below confirmation threshold). Score set to 40.`,
+        type: 'warning',
+        action: 'Review the matched entries below and verify whether they relate to this vendor. Common names may produce false positives.',
+      })
+    }
   }
 
-  if (sd.error) steps.push({ text: `Screening error: ${sd.error}`, type: 'warning' })
   return steps
 }
 
@@ -183,8 +320,31 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
   const status       = sd.status as string | undefined
   const parent       = sd.ultimateParent as { lei?: string; name?: string } | undefined
 
+  if (sd.error) {
+    const cat = categorizeError(sd.error)
+    let action: string
+    if (cat === 'timeout') {
+      action = 'This is usually transient. Re-run the assessment or search at gleif.org manually.'
+    } else if (cat === 'not_found') {
+      action = 'Many legitimate companies — especially smaller UK firms — are not GLEIF-registered. This does not indicate a problem. Verify jurisdiction manually if needed.'
+    } else {
+      action = 'Search at gleif.org to check LEI registration and jurisdiction manually.'
+    }
+    steps.push({
+      text: `GLEIF data could not be retrieved. ${ERROR_LABELS[cat]} The ownership score is based on available information only.`,
+      type: 'warning',
+      action,
+    })
+  }
+
   if (!lei) {
-    steps.push({ text: 'No GLEIF record found for this company.', type: 'info' })
+    if (!sd.error) {
+      steps.push({
+        text: 'No GLEIF record was found for this company.',
+        type: 'info',
+        action: 'Many smaller companies are not GLEIF-registered — this does not indicate a problem. If jurisdiction is important, verify it from the Companies House record.',
+      })
+    }
   } else {
     steps.push({ text: `GLEIF record found. LEI: ${lei}`, type: 'positive' })
     if (legalName) steps.push({ text: `Legal name on record: ${legalName}`, type: 'info' })
@@ -195,20 +355,31 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
     const jUp = jurisdiction.toUpperCase()
     const jLo = jurisdiction.toLowerCase()
     if (HIGH_JURISDICTIONS.has(jUp)) {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is a high-trust jurisdiction (UK/US/EU/equivalent): score 95.`, type: 'positive' })
+      steps.push({ text: `Jurisdiction "${jurisdiction}" is a high-trust jurisdiction (UK / US / EU / equivalent): score 95.`, type: 'positive' })
     } else if (FATF_BLACK_LIST.some(c => jLo.includes(c.toLowerCase()))) {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is on the FATF black list: score 10.`, type: 'deduction' })
+      steps.push({
+        text: `Jurisdiction "${jurisdiction}" is on the FATF black list: score 10.`,
+        type: 'deduction',
+        action: 'Do not proceed without escalating to your compliance team. This jurisdiction is subject to FATF countermeasures.',
+      })
     } else if (FATF_GREY_LIST.some(c => jLo.includes(c.toLowerCase()))) {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is on the FATF grey list: score 40.`, type: 'warning' })
+      steps.push({
+        text: `Jurisdiction "${jurisdiction}" is on the FATF grey list (enhanced monitoring): score 40.`,
+        type: 'warning',
+        action: 'Apply enhanced due diligence. Request beneficial ownership documentation and consider senior management approval.',
+      })
     } else {
       steps.push({ text: `Jurisdiction "${jurisdiction}" is a FATF member in good standing: score 65.`, type: 'info' })
     }
   } else {
-    steps.push({ text: 'Jurisdiction unknown — defaulting to score 40.', type: 'info' })
+    steps.push({
+      text: 'Jurisdiction could not be determined — defaulting to score 40.',
+      type: 'info',
+      action: 'Check the registered address on Companies House to determine the operating jurisdiction.',
+    })
   }
 
   if (parent?.name) steps.push({ text: `Ultimate parent: ${parent.name}${parent.lei ? ` (LEI: ${parent.lei})` : ''}`, type: 'info' })
-  if (sd.error)     steps.push({ text: `GLEIF lookup error: ${sd.error}`, type: 'warning' })
   steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
@@ -218,16 +389,32 @@ function explainTrustCerts(sd: Record<string, unknown>, score: number): Step[] {
   const status = sd.status as string | undefined
   const steps: Step[] = []
 
+  if (sd.error) {
+    steps.push({
+      text: 'An error occurred during portal checks. Results below may be incomplete.',
+      type: 'warning',
+    })
+  }
+
   if (certs.length === 0) {
     if (status === 'inconclusive') {
-      steps.push({ text: 'No certifications detected after checking all automated sources.', type: 'warning' })
-      steps.push({ text: 'Status is inconclusive — base score: 25. Manual verification recommended.', type: 'warning' })
+      steps.push({
+        text: 'No certifications were detected after checking all automated sources, but some sources were unreachable. Base score: 25.',
+        type: 'warning',
+        action: 'Request copies of SOC 2, ISO 27001, or Cyber Essentials certificates directly from the vendor.',
+      })
     } else {
-      steps.push({ text: 'No certifications found across all sources.', type: 'info' })
-      steps.push({ text: 'Base score: 15.', type: 'info' })
+      steps.push({
+        text: 'No certifications were found across any of the automated sources checked. Base score: 15.',
+        type: 'info',
+        action: 'This may mean the vendor does not publish certifications publicly. Request SOC 2, ISO 27001, or Cyber Essentials documentation directly from the vendor.',
+      })
     }
   } else {
-    steps.push({ text: `${certs.length} certification${certs.length !== 1 ? 's' : ''} found. Scoring starts at 0 and accumulates.`, type: 'base' })
+    steps.push({
+      text: `${certs.length} certification${certs.length !== 1 ? 's' : ''} found. Score accumulates per certification.`,
+      type: 'base',
+    })
     const CERT_POINTS: Record<string, number> = {
       SOC2_TYPE_II: 40, ISO_27001: 30, CYBER_ESSENTIALS_PLUS: 20,
       CYBER_ESSENTIALS: 15, ISO_22301: 10,
@@ -243,37 +430,59 @@ function explainTrustCerts(sd: Record<string, unknown>, score: number): Step[] {
     steps.push({ text: `Final score: ${score} (capped at 100).`, type: 'base' })
   }
 
-  if (sd.error) steps.push({ text: `Error during portal checks: ${sd.error}`, type: 'warning' })
   return steps
 }
 
 function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
-  const status    = sd.status as string | undefined
-  const sentiment = sd.sentiment as string | undefined
-  const summary   = sd.summary as string | undefined
-  const items     = (sd.risk_items as Array<{ headline: string; risk_type: string }>) ?? []
+  const status      = sd.status as string | undefined
+  const sentiment   = sd.sentiment as string | undefined
+  const summary     = sd.summary as string | undefined
+  const items       = (sd.risk_items as Array<{ headline: string; risk_type: string }>) ?? []
+  const articlesCount = sd.articles_count as number | undefined
+  const queryNote   = sd.query_note as string | undefined
   const steps: Step[] = []
 
   if (status === 'not_checked') {
-    steps.push({ text: 'No news articles available. Neutral score of 70 applied.', type: 'info' })
+    steps.push({
+      text: `No recent news articles were found${articlesCount === 0 ? '' : ` (${articlesCount ?? 0} articles retrieved)`}. A neutral score of 70 was applied.`,
+      type: 'info',
+      action: 'Search Google News or industry trade press manually for recent coverage of this vendor.',
+    })
+    if (queryNote) steps.push({ text: queryNote, type: 'info' })
     return steps
   }
+
   if (status === 'summary_unavailable') {
-    steps.push({ text: 'AI news analysis unavailable. Neutral score of 70 applied.', type: 'info' })
+    const count = articlesCount ?? 0
+    steps.push({
+      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable. A neutral score of 70 was applied.`,
+      type: 'info',
+      action: 'Review the news headlines manually and re-run the assessment if you need an AI sentiment score.',
+    })
+    if (queryNote) steps.push({ text: queryNote, type: 'info' })
     return steps
   }
 
   const sentimentScores: Record<string, number> = { positive: 90, neutral: 70, mixed: 50, negative: 20 }
   if (sentiment) {
     const t: StepType = sentiment === 'negative' ? 'deduction' : sentiment === 'positive' ? 'positive' : 'info'
-    steps.push({ text: `AI assessed overall sentiment as "${sentiment}": score ${sentimentScores[sentiment] ?? 70}.`, type: t })
+    const count = articlesCount != null ? ` (${articlesCount} article${articlesCount !== 1 ? 's' : ''} analysed)` : ''
+    steps.push({
+      text: `AI assessed overall news sentiment as "${sentiment}"${count}: score ${sentimentScores[sentiment] ?? 70}.`,
+      type: t,
+    })
   }
+
+  if (queryNote) steps.push({ text: queryNote, type: 'info' })
   if (summary) steps.push({ text: `AI summary: "${summary}"`, type: 'info' })
 
   if (items.length === 0) {
-    steps.push({ text: 'No specific risk items identified in headlines.', type: 'positive' })
+    steps.push({ text: 'No specific risk items identified in the headlines.', type: 'positive' })
   } else {
-    steps.push({ text: `${items.length} risk item${items.length !== 1 ? 's' : ''} identified in headlines:`, type: 'warning' })
+    steps.push({
+      text: `${items.length} risk item${items.length !== 1 ? 's' : ''} identified:`,
+      type: 'warning',
+    })
     for (const item of items.slice(0, 5)) {
       steps.push({ text: `"${item.headline}" [${item.risk_type}]`, type: 'warning' })
     }
@@ -393,11 +602,19 @@ export default function DimensionCard({
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
               How this score was calculated
             </p>
-            <ul className="space-y-1.5">
+            <ul className="space-y-2">
               {steps.map((step, i) => (
-                <li key={i} className={`text-sm flex items-start gap-2 ${stepTextColor(step.type)}`}>
+                <li key={i} className="flex items-start gap-2">
                   <StepIcon type={step.type} />
-                  <span>{step.text}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-sm ${stepTextColor(step.type)}`}>{step.text}</span>
+                    {step.action && (
+                      <p className="mt-1 text-xs leading-relaxed">
+                        <span className="font-medium text-indigo-400">Suggested action:</span>{' '}
+                        <span className="text-gray-600">{step.action}</span>
+                      </p>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -411,27 +628,14 @@ export default function DimensionCard({
               </p>
               <div className="divide-y divide-gray-50 rounded-md border border-gray-100 overflow-hidden">
                 {Object.entries(scrapeMeta).map(([portal, meta]) => {
-                  const found   = meta.found
-                  const checked = meta.attempted
+                  const { text, color } = friendlyPortalStatus(meta)
                   return (
                     <div key={portal} className="flex items-start justify-between px-3 py-2 text-xs bg-white">
                       <span className="text-gray-700 font-medium">
                         {PORTAL_LABELS[portal] ?? portal}
                       </span>
-                      <span className={`ml-4 text-right ${
-                        !checked   ? 'text-gray-400' :
-                        found      ? 'text-green-700 font-medium' :
-                        meta.error ? 'text-amber-700' :
-                                     'text-gray-400'
-                      }`}>
-                        {!checked
-                          ? 'Not checked'
-                          : found
-                          ? `Found${meta.keywords_found?.length ? ` — ${meta.keywords_found.slice(0, 2).join(', ')}` : ''}`
-                          : meta.error
-                          ? `Not found — ${meta.error}`
-                          : `Not found${meta.http_status ? ` (HTTP ${meta.http_status})` : ''}`
-                        }
+                      <span className={`ml-4 text-right ${color}`}>
+                        {text}
                       </span>
                     </div>
                   )
@@ -439,7 +643,7 @@ export default function DimensionCard({
               </div>
               {(sd.status as string) === 'inconclusive' && (
                 <p className="text-xs text-amber-700 font-medium mt-2">
-                  All automated checks were inconclusive — manual verification recommended.
+                  All automated checks were inconclusive — request certification documents directly from the vendor.
                 </p>
               )}
             </div>
@@ -481,6 +685,11 @@ export default function DimensionCard({
                         <p className={`mt-0.5 ${m.level === 'confirmed' ? 'text-red-700' : 'text-amber-700'}`}>
                           &ldquo;{m.name}&rdquo; matched against &ldquo;{m.matchedAgainst}&rdquo; ({m.similarity}% similarity)
                         </p>
+                        {m.level === 'possible' && (
+                          <p className="mt-1 text-amber-600 italic">
+                            Possible matches may be coincidental, especially for common names. Verify before escalating.
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>

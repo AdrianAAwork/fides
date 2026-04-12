@@ -74,10 +74,15 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
   // Phase B — Claude calls (sequential, needs Phase A data)
   yield { type: 'step', step: 'ai_analysis', status: 'running' }
   const filingText = ch.filings.map((f) => f.description).join('\n') || null
-  const [goingConcern, newsSentiment] = await Promise.all([
+  const [goingConcern, rawNewsSentiment] = await Promise.all([
     callGoingConcern(filingText),
     callNewsSentiment(vendorName, news.articles),
   ])
+  const newsSentiment = {
+    ...rawNewsSentiment,
+    articlesCount: news.articlesCount ?? news.articles.length,
+    queryNote: news.queryNote,
+  }
   yield { type: 'step', step: 'ai_analysis', status: 'done' }
 
   // Phase C — scoring
