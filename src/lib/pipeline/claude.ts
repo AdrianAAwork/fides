@@ -7,11 +7,17 @@ import type {
   PipelineScores,
 } from './types'
 
-const MODEL = 'claude-sonnet-4-5'
+const MODEL = 'claude-sonnet-4-6'
 const TIMEOUT_MS = 30_000
 
 function getClient(): Anthropic {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    console.error('[pipeline:claude] ANTHROPIC_API_KEY is not set')
+  } else {
+    console.log('[pipeline:claude] ANTHROPIC_API_KEY is present (length:', apiKey.length, ')')
+  }
+  return new Anthropic({ apiKey })
 }
 
 async function callClaude(
@@ -22,22 +28,27 @@ async function callClaude(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
-    const msg = await client.messages.create({
-      model: MODEL,
-      max_tokens: 512,
-      system: [
-        {
-          type: 'text',
-          text: systemPrompt,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
-      messages: [{ role: 'user', content: userContent }],
-    })
+    const msg = await client.messages.create(
+      {
+        model: MODEL,
+        max_tokens: 512,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+      },
+      { signal: controller.signal }
+    )
     const block = msg.content[0]
     return block.type === 'text' ? block.text : null
   } catch (err) {
-    console.error('[pipeline:claude] error:', err instanceof Error ? err.message : err)
+    if (err instanceof Anthropic.APIError) {
+      console.error(
+        `[pipeline:claude] APIError status=${err.status} name=${err.name} message=${err.message}`
+      )
+    } else if (err instanceof Error && err.name === 'AbortError') {
+      console.error('[pipeline:claude] request aborted — exceeded', TIMEOUT_MS, 'ms timeout')
+    } else {
+      console.error('[pipeline:claude] unexpected error:', err)
+    }
     return null
   } finally {
     clearTimeout(timer)
@@ -61,9 +72,11 @@ export async function callGoingConcern(filingText: string | null): Promise<Going
   }
 
   try {
-    const parsed = JSON.parse(result) as GoingConcernResult
+    const raw = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const parsed = JSON.parse(raw) as GoingConcernResult
     return { ...parsed, status: 'checked' }
-  } catch {
+  } catch (err) {
+    console.error('[pipeline:claude] going-concern JSON parse failed. Raw result:', result, 'Error:', err)
     return { going_concern: false, confidence: 'low', summary: '', status: 'summary_unavailable' }
   }
 }
@@ -93,9 +106,11 @@ export async function callNewsSentiment(
   }
 
   try {
-    const parsed = JSON.parse(result) as NewsSentimentResult
+    const raw = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const parsed = JSON.parse(raw) as NewsSentimentResult
     return { ...parsed, status: 'checked' }
-  } catch {
+  } catch (err) {
+    console.error('[pipeline:claude] news-sentiment JSON parse failed. Raw result:', result, 'Error:', err)
     return { sentiment: 'neutral', risk_items: [], summary: '', status: 'summary_unavailable' }
   }
 }
@@ -129,9 +144,11 @@ export async function callExecSummary(
   }
 
   try {
-    const parsed = JSON.parse(result) as ExecSummaryResult
+    const raw = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const parsed = JSON.parse(raw) as ExecSummaryResult
     return { ...parsed, status: 'checked' }
-  } catch {
+  } catch (err) {
+    console.error('[pipeline:claude] exec-summary JSON parse failed. Raw result:', result, 'Error:', err)
     return { summary: '', recommended_action: '', key_concerns: [], status: 'summary_unavailable' }
   }
 }
