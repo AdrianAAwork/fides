@@ -85,34 +85,46 @@ async function fetchOfac(): Promise<SanctionRow[]> {
 }
 
 // ─── EU ───────────────────────────────────────────────────────────────────────
+// The EU webgate endpoint (webgate.ec.europa.eu) blocks programmatic access.
+// We use the OpenSanctions mirror which sources directly from the official EU FSF.
+// URL: https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv
 
 async function fetchEu(): Promise<SanctionRow[]> {
-  console.log('[eu] downloading...')
+  console.log('[eu] downloading from OpenSanctions mirror...')
   const res = await fetch(
-    'https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content'
+    'https://data.opensanctions.org/datasets/latest/eu_fsf/targets.simple.csv'
   )
   if (!res.ok) throw new Error(`EU download failed: ${res.status}`)
   const text = await res.text()
+  const lines = text.split('\n')
+  // Header: id,schema,name,aliases,birth_date,countries,addresses,identifiers,
+  //         sanctions,phones,emails,program_ids,dataset,first_seen,last_seen,last_change
+  const dataLines = lines.slice(1).filter(Boolean)
   const rows: SanctionRow[] = []
 
-  const subjectMatches = text.matchAll(/<sanctionEntity>([\s\S]*?)<\/sanctionEntity>/g)
-  for (const match of subjectMatches) {
-    const entry = match[1]
-    const logicalId = (entry.match(/logicalId="([^"]+)"/) ?? [])[1] ?? ''
-    const subjectType = entry.includes('physicalperson') ? 'individual' : 'entity'
+  for (const line of dataLines) {
+    const cols = parseCSVLine(line)
+    if (cols.length < 4) continue
 
-    const nameMatch = entry.match(/<wholeName>([^<]+)<\/wholeName>/)
-    const name = nameMatch?.[1]?.trim()
+    const refId = cols[0]?.trim()
+    const schema = cols[1]?.trim()   // 'Person' | 'Organization' | 'LegalEntity' etc.
+    const name = cols[2]?.trim()
     if (!name) continue
 
-    const aliasMatches = entry.matchAll(/<nameAlias[^>]*>([\s\S]*?)<\/nameAlias>/g)
-    const aliases: string[] = []
-    for (const alias of aliasMatches) {
-      const akaWhole = alias[1].match(/<wholeName>([^<]+)<\/wholeName>/)?.[1]?.trim()
-      if (akaWhole && akaWhole !== name) aliases.push(akaWhole)
-    }
+    const type: 'individual' | 'entity' = schema === 'Person' ? 'individual' : 'entity'
 
-    rows.push({ name, aliases, source: 'EU', type: subjectType, referenceNumber: logicalId })
+    // Aliases are semicolon-separated inside the CSV field
+    const aliasRaw = cols[3]?.trim()
+    const aliases = aliasRaw
+      ? aliasRaw.split(';').map((a) => a.trim()).filter((a) => a && a !== name)
+      : []
+
+    // Extract listing date from the sanctions field (last date in the program string)
+    const sanctionsField = cols[8]?.trim()
+    const dateMatch = sanctionsField?.match(/(\d{4}-\d{2}-\d{2})$/)
+    const listedAt = dateMatch?.[1]
+
+    rows.push({ name, aliases, source: 'EU', type, referenceNumber: refId, listedAt })
   }
 
   console.log(`[eu] parsed ${rows.length} entries`)
