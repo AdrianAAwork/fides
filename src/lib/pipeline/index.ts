@@ -21,6 +21,7 @@ export interface PipelineInput {
   companiesHouseNumber?: string
   orgId: string
   userId: string
+  previousAssessmentId?: string
 }
 
 export type PipelineEvent =
@@ -29,7 +30,7 @@ export type PipelineEvent =
   | { type: 'error'; message: string }
 
 export async function* runPipeline(input: PipelineInput): AsyncGenerator<PipelineEvent> {
-  const { vendorName, companiesHouseNumber, orgId, userId } = input
+  const { vendorName, companiesHouseNumber, orgId, userId, previousAssessmentId } = input
 
   yield { type: 'step', step: 'companies_house', status: 'running' }
   const ch = companiesHouseNumber
@@ -106,6 +107,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
       const [assessment] = await tx.insert(assessments).values({
         orgId,
         createdBy: userId,
+        previousAssessmentId: previousAssessmentId ?? null,
         vendorName: ch.company_name || vendorName,
         companiesHouseNumber: ch.company_number || null,
         lei: gleif.lei ?? null,

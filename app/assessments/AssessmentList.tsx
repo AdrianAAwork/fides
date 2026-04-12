@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import type { AssessmentRow } from './page'
@@ -18,12 +19,17 @@ interface Props {
   currentTier?: string
   page: number
   hasMore: boolean
+  canModify: boolean
 }
 
-export default function AssessmentList({ rows, currentTier, page, hasMore }: Props) {
+export default function AssessmentList({ rows, currentTier, page, hasMore, canModify }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+
+  // id of the row currently showing the delete confirmation
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   function setTier(tier: string | null) {
     const params = new URLSearchParams(searchParams.toString())
@@ -37,6 +43,22 @@ export default function AssessmentList({ rows, currentTier, page, hasMore }: Pro
     const params = new URLSearchParams(searchParams.toString())
     params.set('page', String(p))
     router.push(`${pathname}?${params.toString()}`)
+  }
+
+  async function handleDelete(id: string) {
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/assessments/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const body = await res.json() as { error?: string }
+        alert(body.error ?? 'Delete failed')
+        return
+      }
+      setConfirmId(null)
+      router.refresh()
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -148,12 +170,46 @@ export default function AssessmentList({ rows, currentTier, page, hasMore }: Pro
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                    <Link
-                      href={`/assessments/${row.id}`}
-                      className="text-indigo-600 hover:text-indigo-800 font-medium"
-                    >
-                      View
-                    </Link>
+                    {confirmId === row.id ? (
+                      <span className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-gray-600">Delete?</span>
+                        <button
+                          onClick={() => handleDelete(row.id)}
+                          disabled={deleting}
+                          className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                        >
+                          {deleting ? 'Deleting…' : 'Confirm'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmId(null)}
+                          disabled={deleting}
+                          className="text-xs font-medium text-gray-500 hover:text-gray-700"
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-end gap-4">
+                        <Link
+                          href={`/assessments/${row.id}`}
+                          className="text-indigo-600 hover:text-indigo-800 font-medium"
+                        >
+                          View
+                        </Link>
+                        {canModify && (
+                          <button
+                            onClick={() => setConfirmId(row.id)}
+                            className="text-gray-400 hover:text-red-600 transition-colors"
+                            title="Delete assessment"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

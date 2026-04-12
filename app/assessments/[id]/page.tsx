@@ -1,10 +1,12 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { getDbContext } from '@/src/lib/session'
+import { hasRole } from '@/src/lib/auth'
 import { db } from '@/src/db'
 import { assessments, assessmentScores, users } from '@/src/db/schema'
 import { and, eq, isNull } from 'drizzle-orm'
 import DimensionCard from './DimensionCard'
+import AssessmentActions from './AssessmentActions'
 
 const TIER_COLORS: Record<string, string> = {
   LOW: 'bg-green-100 text-green-800',
@@ -84,15 +86,23 @@ export default async function AssessmentDetailPage({
             </Link>
             <h1 className="text-xl font-semibold text-gray-900">{assessment.vendorName}</h1>
           </div>
-          {assessment.riskTier && (
-            <span
-              className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
-                TIER_COLORS[assessment.riskTier] ?? 'bg-gray-100 text-gray-700'
-              }`}
-            >
-              {assessment.riskTier}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {assessment.riskTier && (
+              <span
+                className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+                  TIER_COLORS[assessment.riskTier] ?? 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                {assessment.riskTier}
+              </span>
+            )}
+            {hasRole(ctx.user.role, 'ANALYST') && (
+              <AssessmentActions
+                assessmentId={assessment.id}
+                vendorName={assessment.vendorName}
+              />
+            )}
+          </div>
         </div>
       </header>
 

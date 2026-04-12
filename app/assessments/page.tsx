@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getDbContext } from '@/src/lib/session'
+import { hasRole } from '@/src/lib/auth'
 import AssessmentList from './AssessmentList'
 import { db } from '@/src/db'
 import { assessments, users } from '@/src/db/schema'
@@ -68,6 +69,7 @@ export default async function AssessmentsPage({
           currentTier={tier}
           page={page}
           hasMore={rows.length === limit}
+          canModify={hasRole(ctx.user.role, 'ANALYST')}
         />
       </main>
     </div>
