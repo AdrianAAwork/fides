@@ -36,18 +36,24 @@ export async function fetchGleif(vendorName: string): Promise<GleifData> {
       }>
     }
 
-    // The first result carries the LEI in relationships, not attributes
-    const firstResult = searchData.data?.[0]
-    if (!firstResult) {
-      console.log('[pipeline:gleif] no results for:', vendorName)
+    // Some results lack the lei-records relationship (e.g. shell/placeholder entries).
+    // Iterate to find the first result that actually carries a LEI.
+    const results = searchData.data ?? []
+    if (results.length === 0) {
+      console.log('[pipeline:gleif] no autocomplete results for:', vendorName)
       return {}
     }
 
-    const lei = firstResult.relationships?.['lei-records']?.data?.id
-    if (!lei) {
-      console.log('[pipeline:gleif] first result has no LEI relationship for:', vendorName)
+    const match = results.find((r) => r.relationships?.['lei-records']?.data?.id)
+    if (!match) {
+      console.log(
+        '[pipeline:gleif] none of the', results.length, 'results have a LEI relationship for:', vendorName,
+        '— values:', results.map((r) => r.attributes?.value).join(' | ')
+      )
       return {}
     }
+
+    const lei = match.relationships!['lei-records']!.data!.id!
 
     console.log('[pipeline:gleif] found LEI', lei, 'for:', vendorName)
 

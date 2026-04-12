@@ -10,6 +10,18 @@ import type {
 const MODEL = 'claude-sonnet-4-6'
 const TIMEOUT_MS = 30_000
 
+/**
+ * Extract the first complete {...} JSON object from a string.
+ * Handles cases where the model wraps output in markdown fences or adds
+ * preamble text before the JSON.
+ */
+function extractJson(raw: string): string {
+  const start = raw.indexOf('{')
+  const end   = raw.lastIndexOf('}')
+  if (start === -1 || end === -1 || end < start) return raw.trim()
+  return raw.slice(start, end + 1)
+}
+
 function getClient(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
@@ -72,7 +84,7 @@ export async function callGoingConcern(filingText: string | null): Promise<Going
   }
 
   try {
-    const raw = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const raw = extractJson(result)
     const parsed = JSON.parse(raw) as GoingConcernResult
     return { ...parsed, status: 'checked' }
   } catch (err) {
@@ -106,7 +118,7 @@ export async function callNewsSentiment(
   }
 
   try {
-    const raw = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const raw = extractJson(result)
     const parsed = JSON.parse(raw) as NewsSentimentResult
     return { ...parsed, status: 'checked' }
   } catch (err) {
@@ -144,7 +156,7 @@ export async function callExecSummary(
   }
 
   try {
-    const raw = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const raw = extractJson(result)
     const parsed = JSON.parse(raw) as ExecSummaryResult
     return { ...parsed, status: 'checked' }
   } catch (err) {
