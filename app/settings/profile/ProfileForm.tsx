@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import FidesSeal from '@/src/components/FidesSeal'
+import OrgLogo from '@/src/components/OrgLogo'
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -59,8 +60,7 @@ export default function ProfileForm({ initialDisplayName, email, role, orgName, 
           {(orgLogoUrl || orgName !== 'My organization') && (
             <div className="flex items-center gap-2">
               {orgLogoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={orgLogoUrl} alt={orgName} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+                <OrgLogo style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
               )}
               {orgName !== 'My organization' && (
                 <span className="text-[13px] text-[#8B85A8]">{orgName}</span>

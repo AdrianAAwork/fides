@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   try {
     console.log('[logo upload] calling put:', filename, file.type, buffer.length, 'bytes')
     const blob = await put(filename, buffer, {
-      access: 'public',
+      access: 'private',
       contentType: file.type,
       token: blobToken,
     })

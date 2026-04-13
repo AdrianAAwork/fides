@@ -2,6 +2,7 @@ import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import FidesSeal from '@/src/components/FidesSeal'
+import OrgLogo from '@/src/components/OrgLogo'
 import { db } from '@/src/db'
 import { users, inviteTokens, assessments } from '@/src/db/schema'
 import { and, count, eq, isNull, desc } from 'drizzle-orm'
@@ -89,8 +90,7 @@ export default async function DashboardPage({
             {(org.logoUrl || org.name !== 'My organization') && (
               <div className="flex items-center gap-2 border-r border-[#E2DFF0] pr-4">
                 {org.logoUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={org.logoUrl} alt={org.name} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+                  <OrgLogo style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
                 )}
                 {org.name !== 'My organization' && (
                   <span className="text-[13px] text-[#8B85A8]">{org.name}</span>

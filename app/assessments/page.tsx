@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import FidesSeal from '@/src/components/FidesSeal'
+import OrgLogo from '@/src/components/OrgLogo'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import AssessmentList from './AssessmentList'
@@ -65,8 +66,7 @@ export default async function AssessmentsPage({
             {(ctx.org.logoUrl || ctx.org.name !== 'My organization') && (
               <div className="flex items-center gap-2 border-r border-[#E2DFF0] pr-3">
                 {ctx.org.logoUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={ctx.org.logoUrl} alt={ctx.org.name} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+                  <OrgLogo style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
                 )}
                 {ctx.org.name !== 'My organization' && (
                   <span className="text-[13px] text-[#8B85A8]">{ctx.org.name}</span>

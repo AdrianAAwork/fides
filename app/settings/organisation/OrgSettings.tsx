@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
 import FidesSeal from '@/src/components/FidesSeal'
+import OrgLogo from '@/src/components/OrgLogo'
 import type { InferSelectModel } from 'drizzle-orm'
 import type { organisations, users } from '@/src/db/schema'
 
@@ -33,7 +33,18 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [logoError, setLogoError] = useState('')
+  const [logoSuccess, setLogoSuccess] = useState('')
+  const [logoSignedUrl, setLogoSignedUrl] = useState<string | null>(null)
+  const [logoRefreshKey, setLogoRefreshKey] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!initialOrg.logoUrl) return
+    fetch('/api/org/logo-url')
+      .then(r => r.ok ? r.json() : { url: null })
+      .then(d => setLogoSignedUrl((d.url as string) ?? null))
+      .catch(() => setLogoSignedUrl(null))
+  }, [])
 
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
   const [generatingInvite, setGeneratingInvite] = useState(false)
@@ -108,10 +119,22 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
 
       const newUrl = data.logoUrl as string
       setOrg(prev => ({ ...prev, logoUrl: newUrl }))
+
+      // Fetch fresh signed URL for immediate display
+      try {
+        const signedRes = await fetch('/api/org/logo-url')
+        const signedData = await signedRes.json()
+        setLogoSignedUrl((signedData.url as string) ?? null)
+      } catch {
+        setLogoSignedUrl(null)
+      }
+
+      setLogoRefreshKey(k => k + 1)
       setShowLogoDialog(false)
       setLogoFile(null)
       setLogoPreview(null)
       setLogoError('')
+      setLogoSuccess('Logo uploaded successfully')
     } catch (err) {
       console.error('[logo upload] fetch threw:', err)
       setLogoError('Upload failed — network error. Check the browser console.')
@@ -187,8 +210,7 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
           {(org.logoUrl || org.name !== 'My organization') && (
             <div className="flex items-center gap-2">
               {org.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={org.logoUrl} alt={org.name} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+                <OrgLogo style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} refreshKey={logoRefreshKey} />
               )}
               {org.name !== 'My organization' && (
                 <span className="text-[13px] text-[#8B85A8]">{org.name}</span>
@@ -207,13 +229,13 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
           <div>
             <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-2">Logo</label>
             <div className="flex items-center gap-4">
-              {org.logoUrl ? (
-                <Image
-                  src={org.logoUrl}
+              {logoSignedUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoSignedUrl}
                   alt="Organisation logo"
-                  width={64}
-                  height={64}
-                  className="h-16 w-auto object-contain rounded-lg border border-[#E2DFF0]"
+                  style={{ height: 64, width: 'auto', maxWidth: 128, objectFit: 'contain' }}
+                  className="rounded-lg border border-[#E2DFF0]"
                 />
               ) : (
                 <div className="h-16 w-16 rounded-lg border-2 border-dashed border-[#E2DFF0] flex items-center justify-center text-[#B8B3CE]">
@@ -222,12 +244,17 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
                   </svg>
                 </div>
               )}
-              <button
-                onClick={() => setShowLogoDialog(true)}
-                className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
-              >
-                {org.logoUrl ? 'Change logo' : 'Upload logo'}
-              </button>
+              <div className="space-y-1">
+                <button
+                  onClick={() => { setShowLogoDialog(true); setLogoSuccess('') }}
+                  className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium block"
+                >
+                  {org.logoUrl ? 'Change logo' : 'Upload logo'}
+                </button>
+                {logoSuccess && (
+                  <p className="text-[12px] text-[#27500A]">{logoSuccess}</p>
+                )}
+              </div>
             </div>
           </div>
 
