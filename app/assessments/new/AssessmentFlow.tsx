@@ -50,10 +50,14 @@ const TIER_COLORS: Record<string, string> = {
 
 type FlowStep = 'search' | 'running' | 'complete' | 'error'
 
-export default function AssessmentFlow() {
+interface AssessmentFlowProps {
+  prefill?: string
+}
+
+export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
   const router = useRouter()
   const [flowStep, setFlowStep] = useState<FlowStep>('search')
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(prefill ?? '')
   const [results, setResults] = useState<ChResult[]>([])
   const [searching, setSearching] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)

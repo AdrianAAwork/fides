@@ -5,7 +5,7 @@ import OrgLogo from '@/src/components/OrgLogo'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import { db } from '@/src/db'
-import { assessments, assessmentScores, users, doraClassification, auditLog, certifications } from '@/src/db/schema'
+import { assessments, assessmentScores, users, doraClassification, auditLog, certifications, questionnaires, reassessmentSchedule } from '@/src/db/schema'
 import { and, eq, isNull, desc } from 'drizzle-orm'
 import DimensionCard from './DimensionCard'
 import type { CertRow } from './DimensionCard'
@@ -15,6 +15,7 @@ import type { DoraRow } from './DoraCard'
 import ContractCard from './ContractCard'
 import type { ContractData } from './ContractCard'
 import RegulatoryPanel from './RegulatoryPanel'
+import QuestionnaireButton from './QuestionnaireButton'
 
 const TIER_COLORS: Record<string, string> = {
   LOW: 'bg-[#E6F1FB] text-[#0C447C]',
@@ -161,9 +162,55 @@ export default async function AssessmentDetailPage({
     .where(and(eq(auditLog.assessmentId, id), eq(auditLog.orgId, ctx.org.id)))
     .orderBy(desc(auditLog.createdAt))
 
+  // Questionnaire data
+  const [existingQuestionnaire] = await db
+    .select({ id: questionnaires.id })
+    .from(questionnaires)
+    .where(and(eq(questionnaires.assessmentId, id), isNull(questionnaires.deletedAt)))
+    .limit(1)
+
+  // Reassessment schedule
+  const [reassessmentRow] = await db
+    .select({ scheduledDate: reassessmentSchedule.scheduledDate })
+    .from(reassessmentSchedule)
+    .where(and(eq(reassessmentSchedule.assessmentId, id), eq(reassessmentSchedule.isComplete, false)))
+    .orderBy(desc(reassessmentSchedule.createdAt))
+    .limit(1)
+
   const canOverride = hasRole(ctx.user.role, 'ANALYST')
   const canClassify = hasRole(ctx.user.role, 'ANALYST')
   const canDoraOverride = hasRole(ctx.user.role, 'ADMIN')
+
+  // Compute questionnaire showPrimary conditions
+  const STANDARD_JURISDICTIONS = new Set([
+    'GB','US','AU','CA','JP','CH','NO','NZ','SG',
+    'AT','BE','BG','CY','CZ','DE','DK','EE','ES','FI',
+    'FR','GR','HR','HU','IE','IT','LT','LU','LV','MT',
+    'NL','PL','PT','RO','SE','SI','SK',
+  ])
+  const trustScore = scores.find(s => s.dimension === 'TRUST_CERTS')
+  const trustData = trustScore?.sourceData as Record<string, unknown> | null
+  const autoCertsFound = (trustData?.certs_found as Array<{ certType: string }>) ?? []
+  const allCertTypes = [
+    ...autoCertsFound.map(c => c.certType),
+    ...manualCerts.map(c => c.certType),
+  ]
+  const hasSoc2OrIso = allCertTypes.some(t => ['SOC2_TYPE_I', 'SOC2_TYPE_II', 'ISO_27001'].includes(t))
+  const noTrustPortalAndNoCerts = trustData?.status === 'not_found' && manualCerts.length === 0
+  const financialScore = scores.find(s => s.dimension === 'FINANCIAL_HEALTH')
+  const finData = financialScore?.sourceData as Record<string, unknown> | null
+  const goingConcern = (finData?.going_concern as { going_concern?: boolean })?.going_concern ?? false
+  const nonStandardJurisdiction =
+    assessment.jurisdiction !== null &&
+    !STANDARD_JURISDICTIONS.has(assessment.jurisdiction.toUpperCase().trim())
+  const showPrimaryQuestionnaire =
+    noTrustPortalAndNoCerts ||
+    !hasSoc2OrIso ||
+    doraRow?.classification === 'IMPORTANT' ||
+    doraRow?.classification === 'CRITICAL' ||
+    goingConcern ||
+    (assessment.companyStatus !== null && assessment.companyStatus !== 'active') ||
+    nonStandardJurisdiction
 
   const doraExisting: DoraRow | null = doraRow
     ? {
@@ -251,18 +298,30 @@ export default async function AssessmentDetailPage({
                 {assessor?.displayName ? ` by ${assessor.displayName}` : ''}
               </p>
             </div>
-            {assessment.riskTier && (
-              <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                <span className={`inline-flex items-center px-4 py-1 rounded-full text-[14px] font-medium ${TIER_COLORS[assessment.riskTier] ?? 'bg-[#F9F8FD] text-[#5B5478]'}`}>
-                  {assessment.riskTier}
-                </span>
-                {assessment.overallScore != null && (
-                  <span className="text-[13px] text-[#8B85A8]">
-                    Score: {assessment.overallScore}/100
+            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+              {assessment.riskTier && (
+                <>
+                  <span className={`inline-flex items-center px-4 py-1 rounded-full text-[14px] font-medium ${TIER_COLORS[assessment.riskTier] ?? 'bg-[#F9F8FD] text-[#5B5478]'}`}>
+                    {assessment.riskTier}
                   </span>
-                )}
-              </div>
-            )}
+                  {assessment.overallScore != null && (
+                    <span className="text-[13px] text-[#8B85A8]">
+                      Score: {assessment.overallScore}/100
+                    </span>
+                  )}
+                </>
+              )}
+              <a
+                href={`/api/assessments/${id}/pdf`}
+                download
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E2DFF0] bg-white text-[12px] text-[#5B3FD4] font-medium hover:bg-[#F4F3F8] transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download PDF
+              </a>
+            </div>
           </div>
 
           {/* Meta grid */}
@@ -292,9 +351,9 @@ export default async function AssessmentDetailPage({
             <div className="bg-[#F9F8FD] border border-[#E2DFF0] rounded-lg px-3 py-2.5">
               <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Next review due</p>
               <p className="text-[14px] text-[#1A1625]">
-                {contractDetails?.nextReviewDate
-                  ? new Date(contractDetails.nextReviewDate).toLocaleDateString('en-GB')
-                  : '—'}
+                {reassessmentRow?.scheduledDate
+                  ? new Date(reassessmentRow.scheduledDate).toLocaleDateString('en-GB')
+                  : 'Not scheduled'}
               </p>
             </div>
           </div>
@@ -382,6 +441,18 @@ export default async function AssessmentDetailPage({
             canOverride={canDoraOverride}
           />
         </div>
+
+        {/* ── Questionnaire button ───────────────────────────────────────────── */}
+        {canOverride && (
+          <div className={`bg-white rounded-xl border px-6 py-5 ${showPrimaryQuestionnaire ? 'border-[#5B3FD4]' : 'border-[#E2DFF0]'}`}>
+            <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3">Due diligence questionnaire</p>
+            <QuestionnaireButton
+              assessmentId={id}
+              showPrimary={showPrimaryQuestionnaire}
+              hasExistingQuestionnaire={!!existingQuestionnaire}
+            />
+          </div>
+        )}
 
         {/* ── Contract & SLA ─────────────────────────────────────────────────── */}
         <ContractCard

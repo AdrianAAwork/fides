@@ -4,8 +4,8 @@ import Link from 'next/link'
 import FidesSeal from '@/src/components/FidesSeal'
 import OrgLogo from '@/src/components/OrgLogo'
 import { db } from '@/src/db'
-import { users, inviteTokens, assessments } from '@/src/db/schema'
-import { and, count, eq, isNull, desc } from 'drizzle-orm'
+import { users, inviteTokens, assessments, certAlerts, certifications, reassessmentSchedule } from '@/src/db/schema'
+import { and, count, eq, isNull, desc, lte } from 'drizzle-orm'
 import { getDbContext } from '@/src/lib/session'
 import { CLAIMS, hasRole } from '@/src/lib/auth'
 
@@ -77,6 +77,53 @@ export default async function DashboardPage({
     .limit(5)
 
   const canCreateAssessment = hasRole(user.role, 'ANALYST')
+
+  // Cert alerts
+  const activeCertAlerts = await db
+    .select({
+      certType: certifications.certType,
+      expiryDate: certifications.expiryDate,
+      alertType: certAlerts.alertType,
+      daysRemaining: certAlerts.daysRemaining,
+      vendorName: assessments.vendorName,
+      assessmentId: assessments.id,
+    })
+    .from(certAlerts)
+    .innerJoin(certifications, eq(certAlerts.certId, certifications.id))
+    .innerJoin(assessments, eq(certAlerts.assessmentId, assessments.id))
+    .where(
+      and(
+        eq(certAlerts.orgId, org.id),
+        eq(certAlerts.acknowledged, false),
+        isNull(certifications.deletedAt),
+        isNull(assessments.deletedAt),
+      )
+    )
+    .orderBy(certAlerts.daysRemaining)
+    .limit(10)
+
+  // Vendors due for reassessment within 30 days
+  const thirtyDaysFromNow = new Date()
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30)
+
+  const dueForReassessment = await db
+    .select({
+      vendorName: assessments.vendorName,
+      companiesHouseNumber: assessments.companiesHouseNumber,
+      scheduledDate: reassessmentSchedule.scheduledDate,
+      assessmentId: assessments.id,
+    })
+    .from(reassessmentSchedule)
+    .innerJoin(assessments, eq(reassessmentSchedule.assessmentId, assessments.id))
+    .where(
+      and(
+        eq(reassessmentSchedule.orgId, org.id),
+        eq(reassessmentSchedule.isComplete, false),
+        lte(reassessmentSchedule.scheduledDate, thirtyDaysFromNow.toISOString().split('T')[0]),
+        isNull(assessments.deletedAt),
+      )
+    )
+    .orderBy(reassessmentSchedule.scheduledDate)
 
   return (
     <div className="min-h-screen bg-[#F4F3F8]">
@@ -209,6 +256,103 @@ export default async function DashboardPage({
             </div>
           )}
         </div>
+
+        {/* ── Certification alerts ───────────────────────────────────────────── */}
+        {activeCertAlerts.length > 0 && (
+          <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5">
+            <h2 className="text-[15px] font-medium text-[#1A1625] mb-4">Certification alerts</h2>
+            <div className="divide-y divide-[#E2DFF0]">
+              {activeCertAlerts.map((alert, i) => {
+                const days = alert.daysRemaining ?? 0
+                const expired = alert.alertType === 'EXPIRED'
+                const badge =
+                  expired
+                    ? 'bg-[#3C1515] text-[#FCEBEB]'
+                    : days <= 7
+                    ? 'bg-[#FCEBEB] text-[#791F1F]'
+                    : days <= 30
+                    ? 'bg-[#FEE2CC] text-[#7C3A0A]'
+                    : 'bg-[#FAEEDA] text-[#633806]'
+
+                const certLabel: Record<string, string> = {
+                  SOC2_TYPE_I: 'SOC 2 Type I', SOC2_TYPE_II: 'SOC 2 Type II',
+                  ISO_27001: 'ISO 27001', ISO_22301: 'ISO 22301', ISO_27701: 'ISO 27701',
+                  CYBER_ESSENTIALS: 'Cyber Essentials', CYBER_ESSENTIALS_PLUS: 'Cyber Essentials Plus',
+                  PCI_DSS: 'PCI DSS', CSA_STAR: 'CSA STAR', OTHER: 'Other',
+                }
+
+                return (
+                  <div key={i} className="flex items-center justify-between py-3 gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-medium text-[#1A1625]">
+                        {certLabel[alert.certType] ?? alert.certType}
+                      </p>
+                      <p className="text-[12px] text-[#8B85A8] mt-0.5">{alert.vendorName}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium ${badge}`}>
+                        {expired ? 'Expired' : days <= 7 ? `${days}d remaining` : days <= 30 ? `${days}d remaining` : `${days}d remaining`}
+                      </span>
+                      {alert.expiryDate && (
+                        <span className="text-[12px] text-[#B8B3CE] whitespace-nowrap">
+                          {new Date(alert.expiryDate).toLocaleDateString('en-GB')}
+                        </span>
+                      )}
+                      <Link
+                        href={`/assessments/${alert.assessmentId}`}
+                        className="text-[12px] text-[#5B3FD4] hover:text-[#3C3489] font-medium whitespace-nowrap"
+                      >
+                        View assessment →
+                      </Link>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Due for reassessment ───────────────────────────────────────────── */}
+        {dueForReassessment.length > 0 && (
+          <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5">
+            <h2 className="text-[15px] font-medium text-[#1A1625] mb-4">Due for reassessment</h2>
+            <div className="divide-y divide-[#E2DFF0]">
+              {dueForReassessment.map((row, i) => {
+                const scheduled = new Date(row.scheduledDate)
+                const now = new Date()
+                const diffDays = Math.ceil((scheduled.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                const isOverdue = diffDays < 0
+                const isUrgent = !isOverdue && diffDays <= 7
+                const dateColor = isOverdue ? 'text-[#791F1F]' : isUrgent ? 'text-[#633806]' : 'text-[#1A1625]'
+
+                return (
+                  <div key={i} className="flex items-center justify-between py-3 gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-medium text-[#1A1625]">{row.vendorName}</p>
+                      {row.companiesHouseNumber && (
+                        <p className="text-[12px] text-[#8B85A8] mt-0.5">CH: {row.companiesHouseNumber}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[13px] font-medium ${dateColor}`}>
+                        {isOverdue
+                          ? `Overdue by ${Math.abs(diffDays)}d`
+                          : scheduled.toLocaleDateString('en-GB')}
+                      </span>
+                      <Link
+                        href={`/assessments/new?prefill=${encodeURIComponent(row.vendorName)}`}
+                        className="px-3 py-1.5 rounded-lg bg-[#5B3FD4] text-white text-[12px] font-medium hover:bg-[#3C3489] transition-colors whitespace-nowrap"
+                      >
+                        Start reassessment →
+                      </Link>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   )

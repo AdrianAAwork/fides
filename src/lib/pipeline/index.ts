@@ -15,6 +15,7 @@ import { fetchTrustPortals } from './trust-portals'
 import { callGoingConcern, callNewsSentiment, callExecSummary } from './claude'
 import { calculateScores, shouldTriggerQuestionnaire } from './scoring'
 import type { PipelineResult } from './types'
+import { eq, and } from 'drizzle-orm'
 
 export interface PipelineInput {
   vendorName: string
@@ -174,15 +175,51 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
         newValue: { riskTier: scores.riskTier, overallScore: scores.overallScore } as Record<string, unknown>,
       })
 
-      // Reassessment schedule — 1 year from now
+      // Reassessment schedule — interval based on risk tier
+      const REASSESSMENT_MONTHS: Record<string, number> = {
+        CRITICAL: 6,
+        HIGH: 12,
+        MEDIUM: 18,
+        LOW: 24,
+      }
+      const months = REASSESSMENT_MONTHS[scores.riskTier] ?? 12
       const scheduledDate = new Date()
-      scheduledDate.setFullYear(scheduledDate.getFullYear() + 1)
-      await tx.insert(reassessmentSchedule).values({
-        assessmentId: aId,
-        orgId,
-        scheduledDate: scheduledDate.toISOString().split('T')[0],
-        triggerType: 'ANNUAL',
-      })
+      scheduledDate.setMonth(scheduledDate.getMonth() + months)
+      const scheduledDateStr = scheduledDate.toISOString().split('T')[0]
+
+      // Check if a schedule already exists for this vendor (by CH number + orgId)
+      let updatedExisting = false
+      if (ch.company_number) {
+        const existing = await tx
+          .select({ id: reassessmentSchedule.id })
+          .from(reassessmentSchedule)
+          .innerJoin(assessments, eq(reassessmentSchedule.assessmentId, assessments.id))
+          .where(
+            and(
+              eq(assessments.companiesHouseNumber, ch.company_number),
+              eq(assessments.orgId, orgId),
+              eq(reassessmentSchedule.isComplete, false),
+            )
+          )
+          .limit(1)
+
+        if (existing.length > 0) {
+          await tx
+            .update(reassessmentSchedule)
+            .set({ assessmentId: aId, scheduledDate: scheduledDateStr })
+            .where(eq(reassessmentSchedule.id, existing[0].id))
+          updatedExisting = true
+        }
+      }
+
+      if (!updatedExisting) {
+        await tx.insert(reassessmentSchedule).values({
+          assessmentId: aId,
+          orgId,
+          scheduledDate: scheduledDateStr,
+          triggerType: 'ANNUAL',
+        })
+      }
 
       // Questionnaire trigger
       const shouldTrigger = shouldTriggerQuestionnaire(

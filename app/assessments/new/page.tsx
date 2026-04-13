@@ -6,10 +6,16 @@ import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import AssessmentFlow from './AssessmentFlow'
 
-export default async function NewAssessmentPage() {
+export default async function NewAssessmentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ prefill?: string }>
+}) {
   const ctx = await getDbContext()
   if (!ctx) redirect('/')
   if (!hasRole(ctx.user.role, 'ANALYST')) redirect('/dashboard')
+
+  const { prefill } = await searchParams
 
   return (
     <div className="min-h-screen bg-[#F4F3F8]">
@@ -41,7 +47,7 @@ export default async function NewAssessmentPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-        <AssessmentFlow />
+        <AssessmentFlow prefill={prefill} />
       </main>
     </div>
   )
