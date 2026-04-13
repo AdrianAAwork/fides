@@ -1,27 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-
 interface Props {
   style?: React.CSSProperties
-  /** Increment to force a re-fetch without unmounting */
+  /** Pass a unique cache-busting key after a fresh upload (e.g. a timestamp) */
   refreshKey?: number
 }
 
 export default function OrgLogo({ style, refreshKey = 0 }: Props) {
-  const [url, setUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/org/logo-url')
-      .then(r => r.ok ? r.json() : { url: null })
-      .then(d => { if (!cancelled) setUrl((d.url as string) ?? null) })
-      .catch(() => { if (!cancelled) setUrl(null) })
-    return () => { cancelled = true }
-  }, [refreshKey])
-
-  if (!url) return null
+  const src = `/api/org/logo-image${refreshKey ? `?v=${refreshKey}` : ''}`
 
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="" style={style} />
+  return <img src={src} alt="" style={style} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
 }

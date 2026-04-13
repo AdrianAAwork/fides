@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
 import FidesSeal from '@/src/components/FidesSeal'
 import OrgLogo from '@/src/components/OrgLogo'
@@ -34,17 +34,8 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [logoError, setLogoError] = useState('')
   const [logoSuccess, setLogoSuccess] = useState('')
-  const [logoSignedUrl, setLogoSignedUrl] = useState<string | null>(null)
   const [logoRefreshKey, setLogoRefreshKey] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!initialOrg.logoUrl) return
-    fetch('/api/org/logo-url')
-      .then(r => r.ok ? r.json() : { url: null })
-      .then(d => setLogoSignedUrl((d.url as string) ?? null))
-      .catch(() => setLogoSignedUrl(null))
-  }, [])
 
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
   const [generatingInvite, setGeneratingInvite] = useState(false)
@@ -119,16 +110,6 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
 
       const newUrl = data.logoUrl as string
       setOrg(prev => ({ ...prev, logoUrl: newUrl }))
-
-      // Fetch fresh signed URL for immediate display
-      try {
-        const signedRes = await fetch('/api/org/logo-url')
-        const signedData = await signedRes.json()
-        setLogoSignedUrl((signedData.url as string) ?? null)
-      } catch {
-        setLogoSignedUrl(null)
-      }
-
       setLogoRefreshKey(k => k + 1)
       setShowLogoDialog(false)
       setLogoFile(null)
@@ -229,14 +210,13 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
           <div>
             <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-2">Logo</label>
             <div className="flex items-center gap-4">
-              {logoSignedUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={logoSignedUrl}
-                  alt="Organisation logo"
-                  style={{ height: 64, width: 'auto', maxWidth: 128, objectFit: 'contain' }}
-                  className="rounded-lg border border-[#E2DFF0]"
-                />
+              {org.logoUrl ? (
+                <div className="h-16 w-auto max-w-[128px] rounded-lg border border-[#E2DFF0] flex items-center justify-center overflow-hidden p-1">
+                  <OrgLogo
+                    refreshKey={logoRefreshKey}
+                    style={{ maxHeight: 56, maxWidth: 120, objectFit: 'contain' }}
+                  />
+                </div>
               ) : (
                 <div className="h-16 w-16 rounded-lg border-2 border-dashed border-[#E2DFF0] flex items-center justify-center text-[#B8B3CE]">
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
