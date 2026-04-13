@@ -3,9 +3,10 @@ import Link from 'next/link'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import { db } from '@/src/db'
-import { assessments, assessmentScores, users, doraClassification, auditLog } from '@/src/db/schema'
+import { assessments, assessmentScores, users, doraClassification, auditLog, certifications } from '@/src/db/schema'
 import { and, eq, isNull, desc } from 'drizzle-orm'
 import DimensionCard from './DimensionCard'
+import type { CertRow } from './DimensionCard'
 import AssessmentActions from './AssessmentActions'
 import DoraCard from './DoraCard'
 import type { DoraRow } from './DoraCard'
@@ -44,6 +45,8 @@ const ACTION_LABELS: Record<string, string> = {
   SCORE_OVERRIDDEN: 'Score adjusted',
   CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
   CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',
+  CERT_ADDED: 'Certification added',
+  CERT_DELETED: 'Certification removed',
 }
 
 function buildAuditDescription(entry: {
@@ -75,6 +78,14 @@ function buildAuditDescription(entry: {
     if (oldCls && newCls) parts.push(`${oldCls} → ${newCls}`)
     if (entry.reason) parts.push(entry.reason)
     return parts.join(' · ')
+  }
+  if (entry.actionType === 'CERT_ADDED') {
+    const ct = (newVal?.certType as string | undefined)?.replace(/_/g, ' ') ?? ''
+    return ct ? `${ct} · MANUAL` : ''
+  }
+  if (entry.actionType === 'CERT_DELETED') {
+    const ct = (oldVal?.certType as string | undefined)?.replace(/_/g, ' ') ?? ''
+    return ct
   }
   return ''
 }
@@ -113,6 +124,25 @@ export default async function AssessmentDetailPage({
     .from(doraClassification)
     .where(eq(doraClassification.assessmentId, id))
     .limit(1)
+
+  const manualCerts = await db
+    .select({
+      id: certifications.id,
+      certType: certifications.certType,
+      issuingBody: certifications.issuingBody,
+      auditPeriodStart: certifications.auditPeriodStart,
+      auditPeriodEnd: certifications.auditPeriodEnd,
+      expiryDate: certifications.expiryDate,
+      sourceUrl: certifications.sourceUrl,
+      notes: certifications.notes,
+    })
+    .from(certifications)
+    .where(and(
+      eq(certifications.assessmentId, id),
+      eq(certifications.sourceType, 'MANUAL'),
+      isNull(certifications.deletedAt),
+    ))
+    .orderBy(certifications.createdAt)
 
   const auditEntries = await db
     .select({
@@ -326,6 +356,7 @@ export default async function AssessmentDetailPage({
                   scoreId={score.id}
                   assessmentId={id}
                   canOverride={canOverride}
+                  certifications={dim === 'TRUST_CERTS' ? (manualCerts as CertRow[]) : undefined}
                 />
               )
             })}

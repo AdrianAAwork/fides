@@ -6,6 +6,17 @@ import { FATF_GREY_LIST, FATF_BLACK_LIST } from '@/src/lib/fatf'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface CertRow {
+  id: string
+  certType: string
+  issuingBody: string | null
+  auditPeriodStart: string | null
+  auditPeriodEnd: string | null
+  expiryDate: string | null
+  sourceUrl: string | null
+  notes: string | null
+}
+
 interface Props {
   dimension: string
   label: string
@@ -20,6 +31,7 @@ interface Props {
   scoreId: string
   assessmentId: string
   canOverride: boolean
+  certifications?: CertRow[]
 }
 
 type StepType = 'base' | 'deduction' | 'positive' | 'info' | 'warning'
@@ -544,9 +556,42 @@ function stepTextColor(type: StepType): string {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+const CERT_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'SOC2_TYPE_II', label: 'SOC 2 Type II' },
+  { value: 'SOC2_TYPE_I', label: 'SOC 2 Type I' },
+  { value: 'ISO_27001', label: 'ISO 27001' },
+  { value: 'ISO_22301', label: 'ISO 22301' },
+  { value: 'ISO_27701', label: 'ISO 27701' },
+  { value: 'CYBER_ESSENTIALS', label: 'Cyber Essentials' },
+  { value: 'CYBER_ESSENTIALS_PLUS', label: 'Cyber Essentials Plus' },
+  { value: 'PCI_DSS', label: 'PCI DSS' },
+  { value: 'CSA_STAR', label: 'CSA STAR' },
+  { value: 'OTHER', label: 'Other certification' },
+]
+
+interface CertForm {
+  certType: string
+  issuingBody: string
+  auditPeriodStart: string
+  auditPeriodEnd: string
+  expiryDate: string
+  sourceUrl: string
+  notes: string
+}
+
+const EMPTY_CERT_FORM: CertForm = {
+  certType: 'SOC2_TYPE_II',
+  issuingBody: '',
+  auditPeriodStart: '',
+  auditPeriodEnd: '',
+  expiryDate: '',
+  sourceUrl: '',
+  notes: '',
+}
+
 export default function DimensionCard({
   dimension, label, weight, finalScore, rawScore, isOverridden, overrideReason, overriddenAt,
-  sourceData, fetchedAt, scoreId, assessmentId, canOverride,
+  sourceData, fetchedAt, scoreId, assessmentId, canOverride, certifications = [],
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -555,6 +600,12 @@ export default function DimensionCard({
   const [overrideReason2, setOverrideReason2] = useState('')
   const [saving, setSaving] = useState(false)
   const [overrideError, setOverrideError] = useState<string | null>(null)
+  const [certFormOpen, setCertFormOpen] = useState(false)
+  const [certForm, setCertForm] = useState<CertForm>(EMPTY_CERT_FORM)
+  const [certSaving, setCertSaving] = useState(false)
+  const [certError, setCertError] = useState<string | null>(null)
+  const [certDeleteId, setCertDeleteId] = useState<string | null>(null)
+  const [certDeleting, setCertDeleting] = useState(false)
 
   async function handleOverrideSave() {
     const ns = Number(newScoreVal)
@@ -588,6 +639,58 @@ export default function DimensionCard({
       setSaving(false)
     }
   }
+  async function handleCertSave() {
+    setCertError(null)
+    setCertSaving(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/certifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          certType: certForm.certType,
+          issuingBody: certForm.issuingBody || null,
+          auditPeriodStart: certForm.auditPeriodStart || null,
+          auditPeriodEnd: certForm.auditPeriodEnd || null,
+          expiryDate: certForm.expiryDate || null,
+          sourceUrl: certForm.sourceUrl || null,
+          notes: certForm.notes || null,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setCertError((data as { error?: string }).error ?? 'Failed to save.')
+        return
+      }
+      setCertFormOpen(false)
+      setCertForm(EMPTY_CERT_FORM)
+      router.refresh()
+    } catch {
+      setCertError('Network error. Please try again.')
+    } finally {
+      setCertSaving(false)
+    }
+  }
+
+  async function handleCertDelete(certId: string) {
+    setCertDeleting(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/certifications/${certId}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setCertError((data as { error?: string }).error ?? 'Failed to remove.')
+        return
+      }
+      setCertDeleteId(null)
+      router.refresh()
+    } catch {
+      setCertError('Network error. Please try again.')
+    } finally {
+      setCertDeleting(false)
+    }
+  }
+
   const sd      = sourceData ?? {}
   const source  = SOURCE_LABELS[dimension] ?? 'Unknown'
   const fetched = fetchedAt ? new Date(fetchedAt).toLocaleString('en-GB') : null
@@ -819,6 +922,204 @@ export default function DimensionCard({
                     ))}
                   </div>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Manual certifications (TRUST_CERTS only) */}
+          {dimension === 'TRUST_CERTS' && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em]">
+                  Manual certifications
+                </p>
+                {canOverride && !certFormOpen && (
+                  <button
+                    onClick={() => { setCertFormOpen(true); setCertError(null) }}
+                    className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                  >
+                    Add certification
+                  </button>
+                )}
+              </div>
+
+              {/* Cert add form */}
+              {certFormOpen && (
+                <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3 mb-3">
+                  <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">Add certification</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Cert type</label>
+                      <select
+                        value={certForm.certType}
+                        onChange={e => setCertForm(p => ({ ...p, certType: e.target.value }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      >
+                        {CERT_TYPE_OPTIONS.map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Issuing body <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
+                      <input
+                        type="text"
+                        placeholder="e.g. AICPA, BSI, IASME"
+                        value={certForm.issuingBody}
+                        onChange={e => setCertForm(p => ({ ...p, issuingBody: e.target.value }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Expiry date <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
+                      <input
+                        type="date"
+                        value={certForm.expiryDate}
+                        onChange={e => setCertForm(p => ({ ...p, expiryDate: e.target.value }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Audit period start <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
+                      <input
+                        type="date"
+                        value={certForm.auditPeriodStart}
+                        onChange={e => setCertForm(p => ({ ...p, auditPeriodStart: e.target.value }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Audit period end <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
+                      <input
+                        type="date"
+                        value={certForm.auditPeriodEnd}
+                        onChange={e => setCertForm(p => ({ ...p, auditPeriodEnd: e.target.value }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Source URL <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
+                      <input
+                        type="text"
+                        placeholder="https://trust.vendor.com/…"
+                        value={certForm.sourceUrl}
+                        onChange={e => setCertForm(p => ({ ...p, sourceUrl: e.target.value }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Notes <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
+                      <input
+                        type="text"
+                        placeholder='e.g. "Found on trust.mypos.com"'
+                        value={certForm.notes}
+                        onChange={e => setCertForm(p => ({ ...p, notes: e.target.value.slice(0, 500) }))}
+                        className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                      />
+                    </div>
+                  </div>
+                  {certError && <p className="text-[12px] text-[#791F1F]">{certError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCertSave}
+                      disabled={certSaving}
+                      className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                    >
+                      {certSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => { setCertFormOpen(false); setCertForm(EMPTY_CERT_FORM); setCertError(null) }}
+                      className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Cert rows */}
+              {certifications.length > 0 ? (
+                <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
+                  {certifications.map(cert => {
+                    const isExpiringSoon = cert.expiryDate
+                      ? (new Date(cert.expiryDate).getTime() - Date.now()) < 90 * 24 * 60 * 60 * 1000
+                      : false
+                    const isExpired = cert.expiryDate
+                      ? new Date(cert.expiryDate) < new Date()
+                      : false
+                    return (
+                      <div key={cert.id} className="px-3 py-3 bg-white">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-center flex-wrap gap-2">
+                              <span className="text-[13px] font-medium text-[#1A1625]">
+                                {CERT_LABELS[cert.certType] ?? cert.certType}
+                              </span>
+                              {cert.issuingBody && (
+                                <span className="text-[12px] text-[#8B85A8]">· {cert.issuingBody}</span>
+                              )}
+                            </div>
+                            {cert.expiryDate && (
+                              <p className={`text-[12px] ${isExpired ? 'text-[#791F1F] font-medium' : isExpiringSoon ? 'text-[#BA7517] font-medium' : 'text-[#5B5478]'}`}>
+                                Expires {new Date(cert.expiryDate).toLocaleDateString('en-GB')}
+                                {isExpired && ' — expired'}
+                                {!isExpired && isExpiringSoon && ' — expiring soon'}
+                              </p>
+                            )}
+                            {cert.sourceUrl && (
+                              <a
+                                href={cert.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[12px] text-[#5B3FD4] hover:text-[#3C3489] block truncate"
+                              >
+                                {cert.sourceUrl}
+                              </a>
+                            )}
+                            {cert.notes && (
+                              <p className="text-[12px] text-[#8B85A8]">{cert.notes}</p>
+                            )}
+                          </div>
+                          {canOverride && (
+                            <div className="flex-shrink-0">
+                              {certDeleteId === cert.id ? (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[12px] text-[#5B5478]">Remove?</span>
+                                  <button
+                                    onClick={() => handleCertDelete(cert.id)}
+                                    disabled={certDeleting}
+                                    className="text-[12px] text-[#791F1F] font-medium hover:text-[#A32D2D] disabled:opacity-50"
+                                  >
+                                    {certDeleting ? 'Removing…' : 'Yes'}
+                                  </button>
+                                  <button
+                                    onClick={() => setCertDeleteId(null)}
+                                    className="text-[12px] text-[#8B85A8] hover:text-[#5B5478]"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => { setCertDeleteId(cert.id); setCertError(null) }}
+                                  className="text-[12px] text-[#B8B3CE] hover:text-[#791F1F] transition-colors"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : !certFormOpen ? (
+                <p className="text-[13px] text-[#B8B3CE]">No manual certifications added yet.</p>
+              ) : null}
+
+              {certError && !certFormOpen && (
+                <p className="text-[12px] text-[#791F1F] mt-2">{certError}</p>
               )}
             </div>
           )}
