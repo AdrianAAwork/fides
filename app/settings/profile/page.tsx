@@ -14,6 +14,7 @@ export default async function ProfilePage() {
       email={ctx.user.email}
       role={ctx.user.role}
       orgName={ctx.org.name}
+      orgLogoUrl={ctx.org.logoUrl}
       isAdmin={ctx.user.role === 'ADMIN'}
     />
   )

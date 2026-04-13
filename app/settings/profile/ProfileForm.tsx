@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import FidesSeal from '@/src/components/FidesSeal'
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -14,10 +15,11 @@ interface Props {
   email: string
   role: string
   orgName: string
+  orgLogoUrl?: string | null
   isAdmin: boolean
 }
 
-export default function ProfileForm({ initialDisplayName, email, role, orgName, isAdmin }: Props) {
+export default function ProfileForm({ initialDisplayName, email, role, orgName, orgLogoUrl, isAdmin }: Props) {
   const [displayName, setDisplayName] = useState(initialDisplayName)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -43,17 +45,28 @@ export default function ProfileForm({ initialDisplayName, email, role, orgName, 
   return (
     <div className="min-h-screen bg-[#F4F3F8]">
       <header className="bg-white border-b border-[#E2DFF0]">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-sm">F</span>
-            </div>
-            <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+              <FidesSeal size={32} />
+              <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
+            </Link>
+            <span className="text-[#E2DFF0]">·</span>
+            <Link href="/dashboard" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">Dashboard</Link>
+            <span className="text-[#E2DFF0]">·</span>
+            <h1 className="text-[15px] font-medium text-[#1A1625]">Profile</h1>
           </div>
-          <span className="text-[#E2DFF0]">·</span>
-          <Link href="/dashboard" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">Dashboard</Link>
-          <span className="text-[#E2DFF0]">·</span>
-          <h1 className="text-[15px] font-medium text-[#1A1625]">Profile</h1>
+          {(orgLogoUrl || orgName !== 'My organization') && (
+            <div className="flex items-center gap-2">
+              {orgLogoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={orgLogoUrl} alt={orgName} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+              )}
+              {orgName !== 'My organization' && (
+                <span className="text-[13px] text-[#8B85A8]">{orgName}</span>
+              )}
+            </div>
+          )}
         </div>
       </header>
 

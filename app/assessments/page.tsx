@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import FidesSeal from '@/src/components/FidesSeal'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import AssessmentList from './AssessmentList'
@@ -49,12 +50,10 @@ export default async function AssessmentsPage({
       <header className="bg-white border-b border-[#E2DFF0]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-sm">F</span>
-              </div>
+            <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+              <FidesSeal size={32} />
               <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
-            </div>
+            </Link>
             <span className="text-[#E2DFF0]">·</span>
             <Link href="/dashboard" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">
               Dashboard
@@ -62,14 +61,27 @@ export default async function AssessmentsPage({
             <span className="text-[#E2DFF0]">·</span>
             <h1 className="text-[15px] font-medium text-[#1A1625]">Assessments</h1>
           </div>
-          {hasRole(ctx.user.role, 'ANALYST') && (
-            <Link
-              href="/assessments/new"
-              className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] transition-colors"
-            >
-              New assessment
-            </Link>
-          )}
+          <div className="flex items-center gap-3">
+            {(ctx.org.logoUrl || ctx.org.name !== 'My organization') && (
+              <div className="flex items-center gap-2 border-r border-[#E2DFF0] pr-3">
+                {ctx.org.logoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={ctx.org.logoUrl} alt={ctx.org.name} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+                )}
+                {ctx.org.name !== 'My organization' && (
+                  <span className="text-[13px] text-[#8B85A8]">{ctx.org.name}</span>
+                )}
+              </div>
+            )}
+            {hasRole(ctx.user.role, 'ANALYST') && (
+              <Link
+                href="/assessments/new"
+                className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] transition-colors"
+              >
+                New assessment
+              </Link>
+            )}
+          </div>
         </div>
       </header>
 

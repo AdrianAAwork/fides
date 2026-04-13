@@ -1,7 +1,7 @@
 import { getSession } from '@auth0/nextjs-auth0'
 import { redirect } from 'next/navigation'
-import Image from 'next/image'
 import Link from 'next/link'
+import FidesSeal from '@/src/components/FidesSeal'
 import { db } from '@/src/db'
 import { users, inviteTokens, assessments } from '@/src/db/schema'
 import { and, count, eq, isNull, desc } from 'drizzle-orm'
@@ -81,23 +81,22 @@ export default async function DashboardPage({
     <div className="min-h-screen bg-[#F4F3F8]">
       <header className="bg-white border-b border-[#E2DFF0]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {org.logoUrl ? (
-              <Image
-                src={org.logoUrl}
-                alt={`${org.name} logo`}
-                width={32}
-                height={32}
-                className="h-8 w-auto object-contain rounded-lg"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-sm">F</span>
+          <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+            <FidesSeal size={32} />
+            <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
+          </Link>
+          <div className="flex items-center gap-4">
+            {(org.logoUrl || org.name !== 'My organization') && (
+              <div className="flex items-center gap-2 border-r border-[#E2DFF0] pr-4">
+                {org.logoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={org.logoUrl} alt={org.name} style={{ maxHeight: 28, maxWidth: 80, objectFit: 'contain' }} />
+                )}
+                {org.name !== 'My organization' && (
+                  <span className="text-[13px] text-[#8B85A8]">{org.name}</span>
+                )}
               </div>
             )}
-            <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
-          </div>
-          <div className="flex items-center gap-4">
             <Link href="/settings/profile" className="text-[13px] text-[#5B5478] hover:text-[#1A1625]">
               {user.displayName}
             </Link>

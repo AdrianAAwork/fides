@@ -754,8 +754,8 @@ export default function DimensionCard({
       {open && (
         <div className="border-t border-[#E2DFF0] px-5 py-5 space-y-5">
 
-          {/* Adjust score button (ANALYST+ only, in expanded panel) */}
-          {canOverride && !overrideOpen && (
+          {/* Adjust score button: only visible in expanded panel */}
+          {open && canOverride && !overrideOpen && (
             <div className="flex justify-end">
               <button
                 onClick={() => { setOverrideOpen(true); setOverrideError(null) }}
