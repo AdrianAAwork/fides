@@ -9,12 +9,16 @@ import DimensionCard from './DimensionCard'
 import AssessmentActions from './AssessmentActions'
 import DoraCard from './DoraCard'
 import type { DoraRow } from './DoraCard'
+import ContractCard from './ContractCard'
+import type { ContractData } from './ContractCard'
+import RegulatoryPanel from './RegulatoryPanel'
+import FidesSeal from '@/src/components/FidesSeal'
 
 const TIER_COLORS: Record<string, string> = {
-  LOW: 'bg-green-100 text-green-800',
-  MEDIUM: 'bg-amber-100 text-amber-800',
-  HIGH: 'bg-orange-100 text-orange-800',
-  CRITICAL: 'bg-red-100 text-red-800',
+  LOW: 'bg-[#E6F1FB] text-[#0C447C]',
+  MEDIUM: 'bg-[#EAF3DE] text-[#27500A]',
+  HIGH: 'bg-[#FAEEDA] text-[#633806]',
+  CRITICAL: 'bg-[#FCEBEB] text-[#791F1F]',
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -35,11 +39,44 @@ const DIMENSION_WEIGHTS: Record<string, number> = {
   NEWS_SENTIMENT: 10,
 }
 
-function scoreColor(score: number): string {
-  if (score >= 75) return 'text-green-600'
-  if (score >= 50) return 'text-amber-600'
-  if (score >= 25) return 'text-orange-600'
-  return 'text-red-600'
+const ACTION_LABELS: Record<string, string> = {
+  ASSESSMENT_CREATED: 'Assessment created',
+  SCORE_OVERRIDDEN: 'Score adjusted',
+  CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
+  CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',
+}
+
+function buildAuditDescription(entry: {
+  actionType: string
+  oldValue: unknown
+  newValue: unknown
+  reason: string | null
+}): string {
+  const oldVal = entry.oldValue as Record<string, unknown> | null | undefined
+  const newVal = entry.newValue as Record<string, unknown> | null | undefined
+  if (entry.actionType === 'SCORE_OVERRIDDEN') {
+    const dim = (newVal?.dimension as string | undefined) ?? ''
+    const oldScore = oldVal?.score
+    const newScore = newVal?.score
+    const parts: string[] = []
+    if (dim) parts.push(dim.replace(/_/g, ' ').toLowerCase())
+    if (oldScore != null && newScore != null) parts.push(`${oldScore} → ${newScore}`)
+    if (entry.reason) parts.push(entry.reason)
+    return parts.join(' · ')
+  }
+  if (entry.actionType === 'CLASSIFICATION_CONFIRMED') {
+    const cls = (newVal?.classification as string | undefined) ?? ''
+    return cls ? `Classified as ${cls}` : ''
+  }
+  if (entry.actionType === 'CLASSIFICATION_OVERRIDDEN') {
+    const oldCls = (oldVal?.classification as string | undefined) ?? ''
+    const newCls = (newVal?.classification as string | undefined) ?? ''
+    const parts: string[] = []
+    if (oldCls && newCls) parts.push(`${oldCls} → ${newCls}`)
+    if (entry.reason) parts.push(entry.reason)
+    return parts.join(' · ')
+  }
+  return ''
 }
 
 export default async function AssessmentDetailPage({
@@ -112,6 +149,16 @@ export default async function AssessmentDetailPage({
       }
     : null
 
+  const contractDetails = assessment.contractDetails as ContractData | null
+
+  // Build subtitle string
+  const subtitleParts: string[] = []
+  if (assessment.companiesHouseNumber) subtitleParts.push(`CH: ${assessment.companiesHouseNumber}`)
+  if (assessment.lei) subtitleParts.push(`LEI: ${assessment.lei}`)
+  if (assessment.sicCode) subtitleParts.push(`SIC: ${assessment.sicCode}`)
+  if (assessment.jurisdiction) subtitleParts.push(assessment.jurisdiction)
+  if (assessment.companyStatus) subtitleParts.push(assessment.companyStatus)
+
   const execSummary = assessment.execSummaryJson as {
     summary?: string
     recommended_action?: string
@@ -120,25 +167,22 @@ export default async function AssessmentDetailPage({
   } | null
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
+    <div className="min-h-screen bg-[#F4F3F8] relative">
+      <header className="bg-white border-b border-[#E2DFF0]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/assessments" className="text-sm text-gray-500 hover:text-gray-700">
-              ← Assessments
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm">F</span>
+              </div>
+              <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
+            </div>
+            <span className="text-[#E2DFF0]">·</span>
+            <Link href="/assessments" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">
+              Assessments
             </Link>
-            <h1 className="text-xl font-semibold text-gray-900">{assessment.vendorName}</h1>
           </div>
           <div className="flex items-center gap-3">
-            {assessment.riskTier && (
-              <span
-                className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
-                  TIER_COLORS[assessment.riskTier] ?? 'bg-gray-100 text-gray-700'
-                }`}
-              >
-                {assessment.riskTier}
-              </span>
-            )}
             {hasRole(ctx.user.role, 'ANALYST') && (
               <AssessmentActions
                 assessmentId={assessment.id}
@@ -149,77 +193,92 @@ export default async function AssessmentDetailPage({
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-        {/* Meta card */}
-        <div className="bg-white rounded-lg shadow p-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Overall score</p>
-            <p className={`text-2xl font-bold ${assessment.overallScore != null ? scoreColor(assessment.overallScore) : 'text-gray-400'}`}>
-              {assessment.overallScore ?? '—'}<span className="text-sm font-normal text-gray-400">/100</span>
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Date assessed</p>
-            <p className="text-sm text-gray-700">{new Date(assessment.createdAt).toLocaleDateString('en-GB')}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Assessed by</p>
-            <p className="text-sm text-gray-700">{assessor?.displayName ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">CH number</p>
-            <p className="text-sm text-gray-700">{assessment.companiesHouseNumber ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              assessment.assessmentStatus === 'COMPLETE' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-            }`}>
-              {assessment.assessmentStatus}
-            </span>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Jurisdiction</p>
-            <p className="text-sm text-gray-700">{assessment.jurisdiction ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Company status</p>
-            <p className="text-sm text-gray-700">{assessment.companyStatus ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">DORA classification</p>
-            {doraRow ? (
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                doraRow.classification === 'CRITICAL' ? 'bg-red-100 text-red-800 border-red-200'
-                : doraRow.classification === 'IMPORTANT' ? 'bg-amber-100 text-amber-800 border-amber-200'
-                : 'bg-green-100 text-green-800 border-green-200'
-              }`}>
-                {doraRow.classification}
-              </span>
-            ) : (
-              <p className="text-sm text-gray-400 italic">Not classified</p>
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+        {/* ── Report header card ─────────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-[22px] font-medium text-[#1A1625] leading-tight">
+                {assessment.vendorName}
+              </h1>
+              {subtitleParts.length > 0 && (
+                <p className="text-[13px] text-[#8B85A8] mt-1">
+                  {subtitleParts.join(' · ')}
+                </p>
+              )}
+              <p className="text-[12px] text-[#B8B3CE] mt-1">
+                Assessed {new Date(assessment.createdAt).toLocaleDateString('en-GB')}
+                {assessor?.displayName ? ` by ${assessor.displayName}` : ''}
+              </p>
+            </div>
+            {assessment.riskTier && (
+              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                <span className={`inline-flex items-center px-4 py-1 rounded-full text-[14px] font-medium ${TIER_COLORS[assessment.riskTier] ?? 'bg-[#F9F8FD] text-[#5B5478]'}`}>
+                  {assessment.riskTier}
+                </span>
+                {assessment.overallScore != null && (
+                  <span className="text-[13px] text-[#8B85A8]">
+                    Score: {assessment.overallScore}/100
+                  </span>
+                )}
+              </div>
             )}
+          </div>
+
+          {/* Meta grid */}
+          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-[#F9F8FD] border border-[#E2DFF0] rounded-lg px-3 py-2.5">
+              <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Company status</p>
+              <p className="text-[14px] text-[#1A1625]">{assessment.companyStatus ?? '—'}</p>
+            </div>
+            <div className="bg-[#F9F8FD] border border-[#E2DFF0] rounded-lg px-3 py-2.5">
+              <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Jurisdiction</p>
+              <p className="text-[14px] text-[#1A1625]">{assessment.jurisdiction ?? '—'}</p>
+            </div>
+            <div className="bg-[#F9F8FD] border border-[#E2DFF0] rounded-lg px-3 py-2.5">
+              <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">DORA classification</p>
+              {doraRow ? (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-medium border ${
+                  doraRow.classification === 'CRITICAL' ? 'bg-[#FCEBEB] text-[#791F1F] border-[#FCEBEB]'
+                  : doraRow.classification === 'IMPORTANT' ? 'bg-[#FAEEDA] text-[#633806] border-[#FAEEDA]'
+                  : 'bg-[#EAF3DE] text-[#27500A] border-[#EAF3DE]'
+                }`}>
+                  {doraRow.classification}
+                </span>
+              ) : (
+                <p className="text-[14px] text-[#B8B3CE]">Not classified</p>
+              )}
+            </div>
+            <div className="bg-[#F9F8FD] border border-[#E2DFF0] rounded-lg px-3 py-2.5">
+              <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Next review due</p>
+              <p className="text-[14px] text-[#1A1625]">
+                {contractDetails?.nextReviewDate
+                  ? new Date(contractDetails.nextReviewDate).toLocaleDateString('en-GB')
+                  : '—'}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Executive summary */}
+        {/* ── Executive summary ──────────────────────────────────────────────── */}
         {execSummary && execSummary.status !== 'summary_unavailable' && execSummary.summary && (
-          <div className="bg-white rounded-lg shadow p-6 space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Executive summary</h2>
-            <p className="text-sm text-gray-700 leading-relaxed">{execSummary.summary}</p>
+          <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5 space-y-4">
+            <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8]">Executive summary</p>
+            <p className="text-[14px] text-[#1A1625] leading-[1.75]">{execSummary.summary}</p>
             {execSummary.recommended_action && (
-              <div className="rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3">
-                <p className="text-xs text-indigo-500 uppercase tracking-wide font-medium mb-1">Recommended action</p>
-                <p className="text-sm text-indigo-800">{execSummary.recommended_action}</p>
+              <div className="border-l-[3px] border-[#BA7517] bg-[#FEF9EE] px-4 py-3 rounded-r-lg">
+                <p className="text-[11px] text-[#BA7517] uppercase tracking-[0.06em] font-medium mb-1">Recommended action</p>
+                <p className="text-[14px] text-[#633806]">{execSummary.recommended_action}</p>
               </div>
             )}
             {execSummary.key_concerns && execSummary.key_concerns.length > 0 && (
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Key concerns</p>
-                <ul className="space-y-1">
+                <p className="text-[11px] text-[#8B85A8] uppercase tracking-[0.06em] font-medium mb-2">Key concerns</p>
+                <ul className="space-y-1.5">
                   {execSummary.key_concerns.map((concern, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
+                    <li key={i} className="flex items-start gap-2 text-[14px] text-[#1A1625]">
+                      <span className="mt-2 w-1.5 h-1.5 rounded-full bg-[#A32D2D] flex-shrink-0" />
                       {concern}
                     </li>
                   ))}
@@ -229,23 +288,25 @@ export default async function AssessmentDetailPage({
           </div>
         )}
 
-        {/* Dimension scores */}
+        {/* ── Dimension scores ───────────────────────────────────────────────── */}
         <div>
-          <h2 className="text-base font-semibold text-gray-900 mb-4">
+          <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3 px-1">
             Dimension scores
-            <span className="ml-2 text-xs font-normal text-gray-400">Click a card to see how the score was calculated</span>
-          </h2>
-          <div className="space-y-3">
+            <span className="ml-2 normal-case text-[#B8B3CE]">· click a card to expand</span>
+          </p>
+          <div className="space-y-2">
             {Object.entries(DIMENSION_LABELS).map(([dim, label]) => {
               const score = scores.find((s) => s.dimension === dim)
               if (!score) {
                 return (
-                  <div key={dim} className="bg-white rounded-lg shadow px-5 py-4">
+                  <div key={dim} className="bg-white rounded-xl border border-[#E2DFF0] px-5 py-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-700">{label}</span>
-                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{DIMENSION_WEIGHTS[dim]}%</span>
+                      <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
+                      <span className="text-[11px] text-[#8B85A8] bg-[#F9F8FD] border border-[#E2DFF0] px-1.5 py-0.5 rounded-full">
+                        {DIMENSION_WEIGHTS[dim]}%
+                      </span>
                     </div>
-                    <p className="text-sm text-gray-400 mt-2">No data available</p>
+                    <p className="text-[13px] text-[#B8B3CE] mt-2">No data available</p>
                   </div>
                 )
               }
@@ -271,9 +332,9 @@ export default async function AssessmentDetailPage({
           </div>
         </div>
 
-        {/* DORA / FCA classification */}
+        {/* ── DORA / FCA classification ──────────────────────────────────────── */}
         <div>
-          <h2 className="text-base font-semibold text-gray-900 mb-4">DORA / FCA classification</h2>
+          <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3 px-1">DORA / FCA classification</p>
           <DoraCard
             assessmentId={id}
             existing={doraExisting}
@@ -282,11 +343,21 @@ export default async function AssessmentDetailPage({
           />
         </div>
 
-        {/* Audit trail */}
+        {/* ── Contract & SLA ─────────────────────────────────────────────────── */}
+        <ContractCard
+          assessmentId={id}
+          existing={contractDetails}
+          canEdit={canOverride}
+        />
+
+        {/* ── Regulatory references ──────────────────────────────────────────── */}
+        <RegulatoryPanel />
+
+        {/* ── Audit trail ────────────────────────────────────────────────────── */}
         {auditEntries.length > 0 && (
           <div>
-            <h2 className="text-base font-semibold text-gray-900 mb-4">Audit trail</h2>
-            <div className="bg-white rounded-lg shadow divide-y divide-gray-100">
+            <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3 px-1">Audit trail</p>
+            <div className="bg-white rounded-xl border border-[#E2DFF0] divide-y divide-[#E2DFF0]">
               {auditEntries.map((entry) => {
                 const performer = entry.userDisplayName ?? entry.userEmail ?? 'System'
                 const actionLabel = ACTION_LABELS[entry.actionType] ?? entry.actionType
@@ -294,11 +365,11 @@ export default async function AssessmentDetailPage({
                 return (
                   <div key={entry.id} className="px-5 py-3 flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800">{actionLabel}</p>
-                      {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
-                      <p className="text-xs text-gray-400 mt-0.5">{performer}</p>
+                      <p className="text-[14px] font-medium text-[#1A1625]">{actionLabel}</p>
+                      {description && <p className="text-[12px] text-[#5B5478] mt-0.5">{description}</p>}
+                      <p className="text-[12px] text-[#B8B3CE] mt-0.5">{performer}</p>
                     </div>
-                    <p className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">
+                    <p className="text-[11px] text-[#B8B3CE] flex-shrink-0 whitespace-nowrap mt-0.5">
                       {new Date(entry.createdAt).toLocaleString('en-GB')}
                     </p>
                   </div>
@@ -307,49 +378,26 @@ export default async function AssessmentDetailPage({
             </div>
           </div>
         )}
+
+        {/* ── Report footer ──────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-[#E2DFF0] px-7 py-5 flex items-center gap-5">
+          <FidesSeal size={56} />
+          <div className="space-y-0.5">
+            <p className="text-[12px] text-[#8B85A8]">
+              Generated by Fides · AI-assisted vendor risk assessment
+            </p>
+            <p className="text-[12px] text-[#8B85A8]">
+              Companies House · GLEIF · OFSI/OFAC/EU sanctions · NCSC · NewsAPI
+            </p>
+            <p className="text-[12px] text-[#B8B3CE]">
+              Assessment ID: {id} · {new Date(assessment.createdAt).toLocaleDateString('en-GB')} · For internal use only
+            </p>
+          </div>
+        </div>
+
       </main>
+
+      {/* Slide-over for RegulatoryPanel is rendered inside RegulatoryPanel with position:absolute */}
     </div>
   )
-}
-
-// ── Audit helpers ─────────────────────────────────────────────────────────────
-
-const ACTION_LABELS: Record<string, string> = {
-  ASSESSMENT_CREATED: 'Assessment created',
-  SCORE_OVERRIDDEN: 'Score adjusted',
-  CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
-  CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',
-}
-
-function buildAuditDescription(entry: {
-  actionType: string
-  oldValue: unknown
-  newValue: unknown
-  reason: string | null
-}): string {
-  const oldVal = entry.oldValue as Record<string, unknown> | null | undefined
-  const newVal = entry.newValue as Record<string, unknown> | null | undefined
-  if (entry.actionType === 'SCORE_OVERRIDDEN') {
-    const dim = (newVal?.dimension as string | undefined) ?? ''
-    const oldScore = oldVal?.score
-    const newScore = newVal?.score
-    const parts: string[] = []
-    if (dim) parts.push(dim.replace(/_/g, ' ').toLowerCase())
-    if (oldScore != null && newScore != null) parts.push(`${oldScore} → ${newScore}`)
-    if (entry.reason) parts.push(entry.reason)
-    return parts.join(' · ')
-  }
-  if (entry.actionType === 'CLASSIFICATION_CONFIRMED') {
-    const cls = (newVal?.classification as string | undefined) ?? ''
-    return cls ? `Classified as ${cls}` : ''
-  }
-  if (entry.actionType === 'CLASSIFICATION_OVERRIDDEN') {
-    const oldCls = (oldVal?.classification as string | undefined) ?? ''
-    const newCls = (newVal?.classification as string | undefined) ?? ''
-    const parts: string[] = []
-    if (oldCls && newCls) parts.push(`${oldCls} → ${newCls}`)
-    if (entry.reason) parts.push(entry.reason)
-    return parts.join(' · ')
-  }
-  return ''
 }

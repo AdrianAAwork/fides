@@ -32,11 +32,20 @@ const STEP_LABELS: Record<string, string> = {
   saving: 'Saving assessment',
 }
 
+const DATA_SOURCES = [
+  { icon: '🏛', label: 'Companies House', desc: 'Company profile, filings & accounts' },
+  { icon: '🌐', label: 'GLEIF', desc: 'Legal entity identifier & ownership' },
+  { icon: '🔍', label: 'Sanctions', desc: 'OFSI, OFAC & EU sanctions lists' },
+  { icon: '📰', label: 'NewsAPI + Claude AI', desc: 'Recent press sentiment analysis' },
+  { icon: '🔒', label: 'Trust portals', desc: 'NCSC, Vanta & SafeBase certifications' },
+  { icon: '⚠️', label: 'Have I Been Pwned', desc: 'Data breach history' },
+]
+
 const TIER_COLORS: Record<string, string> = {
-  LOW: 'bg-green-100 text-green-800',
-  MEDIUM: 'bg-amber-100 text-amber-800',
-  HIGH: 'bg-orange-100 text-orange-800',
-  CRITICAL: 'bg-red-100 text-red-800',
+  LOW: 'bg-[#E6F1FB] text-[#0C447C]',
+  MEDIUM: 'bg-[#EAF3DE] text-[#27500A]',
+  HIGH: 'bg-[#FAEEDA] text-[#633806]',
+  CRITICAL: 'bg-[#FCEBEB] text-[#791F1F]',
 }
 
 type FlowStep = 'search' | 'running' | 'complete' | 'error'
@@ -68,7 +77,6 @@ export default function AssessmentFlow() {
       setShowDropdown(false)
       return
     }
-    // Cancel any in-flight request so stale results never overwrite newer ones
     searchAbortRef.current?.abort()
     searchAbortRef.current = new AbortController()
     const signal = searchAbortRef.current.signal
@@ -81,14 +89,12 @@ export default function AssessmentFlow() {
       setShowDropdown(true)
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return
-      // ignore other errors
     } finally {
       setSearching(false)
     }
   }, [])
 
   useEffect(() => {
-    // Selecting a company updates `query` but must not re-trigger a search
     if (skipSearchRef.current) {
       skipSearchRef.current = false
       return
@@ -99,7 +105,6 @@ export default function AssessmentFlow() {
   }, [query, search])
 
   function selectCompany(result: ChResult) {
-    // Suppress the useEffect search that would fire because query is about to change
     skipSearchRef.current = true
     searchAbortRef.current?.abort()
     setSelected(result)
@@ -124,7 +129,7 @@ export default function AssessmentFlow() {
         try {
           const errBody = await res.json() as { error?: string }
           if (errBody.error) errMsg = errBody.error
-        } catch { /* ignore parse failure */ }
+        } catch { /* ignore */ }
         throw new Error(errMsg)
       }
 
@@ -160,9 +165,7 @@ export default function AssessmentFlow() {
               setPipelineError(event.message ?? 'Unknown error')
               setFlowStep('error')
             }
-          } catch {
-            // malformed SSE line
-          }
+          } catch { /* malformed SSE */ }
         }
       }
     } catch (err) {
@@ -180,14 +183,14 @@ export default function AssessmentFlow() {
     }
   }
 
-  // ─── Step 1: Search ───────────────────────────────────────────────────────
+  // ─── Search ───────────────────────────────────────────────────────────────
 
   if (flowStep === 'search') {
     return (
-      <div className="bg-white rounded-lg shadow p-6 space-y-6">
+      <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5 space-y-5">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">Search for a vendor</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-[15px] font-medium text-[#1A1625] mb-1">Search for a vendor</h2>
+          <p className="text-[13px] text-[#8B85A8]">
             Enter a company name to search the Companies House register.
           </p>
         </div>
@@ -203,34 +206,32 @@ export default function AssessmentFlow() {
                   setSelected(null)
                 }}
                 placeholder="e.g. Acme Ltd"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] focus:outline-none focus:ring-2 focus:ring-[#5B3FD4] focus:border-transparent"
                 autoFocus
               />
               {searching && (
-                <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-[#5B3FD4] border-t-transparent rounded-full animate-spin" />
               )}
 
               {showDropdown && results.length > 0 && (
-                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-72 overflow-y-auto">
+                <div className="absolute z-10 mt-1 w-full bg-white border border-[#E2DFF0] rounded-xl shadow-lg max-h-72 overflow-y-auto">
                   {results.map((r) => (
                     <button
                       key={r.company_number}
                       onClick={() => selectCompany(r)}
-                      className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0"
+                      className="w-full text-left px-4 py-3 hover:bg-[#F9F8FD] border-b border-[#E2DFF0] last:border-0"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900">{r.company_name}</span>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full ${
-                            r.company_status === 'active'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-600'
-                          }`}
-                        >
+                        <span className="text-[14px] font-medium text-[#1A1625]">{r.company_name}</span>
+                        <span className={`text-[12px] px-2 py-0.5 rounded-full ${
+                          r.company_status === 'active'
+                            ? 'bg-[#EAF3DE] text-[#27500A]'
+                            : 'bg-[#F9F8FD] text-[#8B85A8]'
+                        }`}>
                           {r.company_status}
                         </span>
                       </div>
-                      <div className="text-xs text-gray-400 mt-0.5">
+                      <div className="text-[12px] text-[#B8B3CE] mt-0.5">
                         {r.company_number}
                         {r.address_snippet ? ` · ${r.address_snippet}` : ''}
                       </div>
@@ -241,25 +242,45 @@ export default function AssessmentFlow() {
             </div>
 
             {selected && (
-              <div className="rounded-md border border-indigo-200 bg-indigo-50 p-4">
-                <p className="text-sm font-medium text-indigo-800">{selected.company_name}</p>
-                <p className="text-xs text-indigo-600 mt-0.5">
-                  CH: {selected.company_number} · {selected.company_status}
-                </p>
+              <div className="space-y-4">
+                <div className="rounded-xl border border-[#E2DFF0] bg-[#F9F8FD] px-4 py-3">
+                  <p className="text-[14px] font-medium text-[#1A1625]">{selected.company_name}</p>
+                  <p className="text-[12px] text-[#8B85A8] mt-0.5">
+                    CH: {selected.company_number} · {selected.company_status}
+                  </p>
+                </div>
+
+                {/* Data sources that will be checked */}
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3">
+                    Data sources that will be checked
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {DATA_SOURCES.map((source) => (
+                      <div key={source.label} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#F9F8FD] border border-[#E2DFF0]">
+                        <span className="text-base leading-none mt-0.5">{source.icon}</span>
+                        <div>
+                          <p className="text-[13px] font-medium text-[#1A1625]">{source.label}</p>
+                          <p className="text-[11px] text-[#8B85A8]">{source.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-1">
               <button
                 onClick={() => setManualMode(true)}
-                className="text-sm text-gray-500 hover:text-gray-700 underline"
+                className="text-[13px] text-[#8B85A8] hover:text-[#5B5478] underline"
               >
                 Can&apos;t find the company?
               </button>
               <button
                 onClick={handleConfirm}
                 disabled={!selected}
-                className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-40"
+                className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] disabled:opacity-40 transition-colors"
               >
                 Start assessment
               </button>
@@ -268,30 +289,50 @@ export default function AssessmentFlow() {
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor name</label>
+              <label className="block text-[13px] font-medium text-[#5B5478] mb-1">Vendor name</label>
               <input
                 type="text"
                 value={manualName}
                 onChange={(e) => setManualName(e.target.value)}
                 placeholder="Enter vendor name"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] focus:outline-none focus:ring-2 focus:ring-[#5B3FD4] focus:border-transparent"
                 autoFocus
               />
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-[12px] text-[#B8B3CE] mt-1">
                 Assessment will run without a Companies House number.
               </p>
             </div>
+
+            {manualName.trim() && (
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3">
+                  Data sources that will be checked
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {DATA_SOURCES.map((source) => (
+                    <div key={source.label} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#F9F8FD] border border-[#E2DFF0]">
+                      <span className="text-base leading-none mt-0.5">{source.icon}</span>
+                      <div>
+                        <p className="text-[13px] font-medium text-[#1A1625]">{source.label}</p>
+                        <p className="text-[11px] text-[#8B85A8]">{source.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <button
                 onClick={() => setManualMode(false)}
-                className="text-sm text-gray-500 hover:text-gray-700 underline"
+                className="text-[13px] text-[#8B85A8] hover:text-[#5B5478] underline"
               >
                 Back to search
               </button>
               <button
                 onClick={handleConfirm}
                 disabled={!manualName.trim()}
-                className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-40"
+                className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] disabled:opacity-40 transition-colors"
               >
                 Start assessment
               </button>
@@ -302,12 +343,12 @@ export default function AssessmentFlow() {
     )
   }
 
-  // ─── Step 2: Running ──────────────────────────────────────────────────────
+  // ─── Running ──────────────────────────────────────────────────────────────
 
   if (flowStep === 'running') {
     return (
-      <div className="bg-white rounded-lg shadow p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Running assessment…</h2>
+      <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5 space-y-4">
+        <h2 className="text-[15px] font-medium text-[#1A1625]">Running assessment…</h2>
         <div className="space-y-3">
           {Object.entries(STEP_LABELS).map(([key, label]) => {
             const event = pipelineSteps.get(key)
@@ -315,21 +356,26 @@ export default function AssessmentFlow() {
             return (
               <div key={key} className="flex items-center gap-3">
                 {!event ? (
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-200 flex-shrink-0" />
+                  <div className="w-5 h-5 rounded-full border-2 border-[#E2DFF0] flex-shrink-0" />
                 ) : status === 'running' ? (
-                  <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <div className="w-5 h-5 border-2 border-[#5B3FD4] border-t-transparent rounded-full animate-spin flex-shrink-0" />
                 ) : status === 'done' ? (
-                  <div className="w-5 h-5 rounded-full bg-green-500 flex-shrink-0 flex items-center justify-center">
+                  <div className="w-5 h-5 rounded-full bg-[#3B6D11] flex-shrink-0 flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
                 ) : (
-                  <div className="w-5 h-5 rounded-full bg-amber-400 flex-shrink-0 flex items-center justify-center">
+                  <div className="w-5 h-5 rounded-full bg-[#BA7517] flex-shrink-0 flex items-center justify-center">
                     <span className="text-white text-xs font-bold">!</span>
                   </div>
                 )}
-                <span className={`text-sm ${!event ? 'text-gray-400' : status === 'done' ? 'text-gray-700' : status === 'warn' ? 'text-amber-700' : 'text-gray-900'}`}>
+                <span className={`text-[14px] ${
+                  !event ? 'text-[#B8B3CE]'
+                  : status === 'done' ? 'text-[#5B5478]'
+                  : status === 'warn' ? 'text-[#633806]'
+                  : 'text-[#1A1625]'
+                }`}>
                   {label}
                 </span>
               </div>
@@ -340,31 +386,29 @@ export default function AssessmentFlow() {
     )
   }
 
-  // ─── Step 3: Complete ─────────────────────────────────────────────────────
+  // ─── Complete ─────────────────────────────────────────────────────────────
 
   if (flowStep === 'complete' && completedAssessment) {
     return (
-      <div className="bg-white rounded-lg shadow p-6 space-y-4 text-center">
-        <div className="w-12 h-12 rounded-full bg-green-100 mx-auto flex items-center justify-center">
-          <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-8 space-y-4 text-center">
+        <div className="w-12 h-12 rounded-full bg-[#EAF3DE] mx-auto flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#27500A]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h2 className="text-lg font-semibold text-gray-900">Assessment complete</h2>
+        <h2 className="text-[15px] font-medium text-[#1A1625]">Assessment complete</h2>
         <div className="flex items-center justify-center gap-3">
-          <span className="text-sm text-gray-500">Risk tier:</span>
-          <span
-            className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
-              TIER_COLORS[completedAssessment.riskTier] ?? 'bg-gray-100 text-gray-700'
-            }`}
-          >
+          <span className="text-[13px] text-[#8B85A8]">Risk tier:</span>
+          <span className={`inline-flex items-center px-3 py-1 rounded-full text-[14px] font-medium ${
+            TIER_COLORS[completedAssessment.riskTier] ?? 'bg-[#F9F8FD] text-[#5B5478]'
+          }`}>
             {completedAssessment.riskTier}
           </span>
-          <span className="text-sm text-gray-400">Score: {completedAssessment.overallScore}/100</span>
+          <span className="text-[13px] text-[#8B85A8]">Score: {completedAssessment.overallScore}/100</span>
         </div>
         <button
           onClick={() => router.push(`/assessments/${completedAssessment.id}`)}
-          className="mt-2 px-6 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+          className="mt-2 px-6 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] transition-colors"
         >
           View assessment
         </button>
@@ -375,12 +419,12 @@ export default function AssessmentFlow() {
   // ─── Error ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="bg-white rounded-lg shadow p-6 space-y-4">
-      <h2 className="text-lg font-semibold text-red-700">Assessment failed</h2>
-      <p className="text-sm text-gray-600">{pipelineError}</p>
+    <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5 space-y-4">
+      <h2 className="text-[15px] font-medium text-[#791F1F]">Assessment failed</h2>
+      <p className="text-[14px] text-[#5B5478]">{pipelineError}</p>
       <button
         onClick={() => setFlowStep('search')}
-        className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+        className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] transition-colors"
       >
         Try again
       </button>

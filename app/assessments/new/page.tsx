@@ -10,15 +10,21 @@ export default async function NewAssessmentPage() {
   if (!hasRole(ctx.user.role, 'ANALYST')) redirect('/dashboard')
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/assessments" className="text-sm text-gray-500 hover:text-gray-700">
-              ← Assessments
-            </Link>
-            <h1 className="text-xl font-semibold text-gray-900">New assessment</h1>
+    <div className="min-h-screen bg-[#F4F3F8]">
+      <header className="bg-white border-b border-[#E2DFF0]">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
+              <span className="text-white font-bold text-sm">F</span>
+            </div>
+            <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
           </div>
+          <span className="text-[#E2DFF0]">·</span>
+          <Link href="/assessments" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">
+            Assessments
+          </Link>
+          <span className="text-[#E2DFF0]">·</span>
+          <h1 className="text-[15px] font-medium text-[#1A1625]">New assessment</h1>
         </div>
       </header>
 

@@ -65,6 +65,19 @@ const HIGH_JURISDICTIONS = new Set([
 
 // ── Score colour ──────────────────────────────────────────────────────────────
 
+function scoreTextColor(s: number): string {
+  if (s >= 80) return 'text-[#3B6D11]'
+  if (s >= 50) return 'text-[#BA7517]'
+  return 'text-[#A32D2D]'
+}
+
+function scoreBarColor(s: number): string {
+  if (s >= 80) return 'bg-[#3B6D11]'
+  if (s >= 50) return 'bg-[#BA7517]'
+  return 'bg-[#A32D2D]'
+}
+
+// Keep for internal explanation steps
 function scoreColor(s: number) {
   if (s >= 75) return 'text-green-600'
   if (s >= 50) return 'text-amber-600'
@@ -514,19 +527,19 @@ function getSteps(dim: string, sd: Record<string, unknown> | null, score: number
 // ── Step icon helper ──────────────────────────────────────────────────────────
 
 function StepIcon({ type }: { type: StepType }) {
-  if (type === 'deduction') return <span className="text-red-500 font-bold leading-none mt-0.5 flex-shrink-0">↓</span>
-  if (type === 'positive')  return <span className="text-green-500 font-bold leading-none mt-0.5 flex-shrink-0">✓</span>
-  if (type === 'warning')   return <span className="text-amber-500 font-bold leading-none mt-0.5 flex-shrink-0">!</span>
-  if (type === 'base')      return <span className="text-gray-400 leading-none mt-0.5 flex-shrink-0">—</span>
-  return <span className="text-gray-300 leading-none mt-0.5 flex-shrink-0">·</span>
+  if (type === 'deduction') return <span className="text-[#A32D2D] font-bold leading-none mt-0.5 flex-shrink-0">↓</span>
+  if (type === 'positive')  return <span className="text-[#3B6D11] font-bold leading-none mt-0.5 flex-shrink-0">✓</span>
+  if (type === 'warning')   return <span className="text-[#BA7517] font-bold leading-none mt-0.5 flex-shrink-0">!</span>
+  if (type === 'base')      return <span className="text-[#B8B3CE] leading-none mt-0.5 flex-shrink-0">—</span>
+  return <span className="text-[#B8B3CE] leading-none mt-0.5 flex-shrink-0">·</span>
 }
 
 function stepTextColor(type: StepType): string {
-  if (type === 'deduction') return 'text-red-700'
-  if (type === 'positive')  return 'text-green-700'
-  if (type === 'warning')   return 'text-amber-700'
-  if (type === 'base')      return 'text-gray-900 font-medium'
-  return 'text-gray-600'
+  if (type === 'deduction') return 'text-[#791F1F]'
+  if (type === 'positive')  return 'text-[#27500A]'
+  if (type === 'warning')   return 'text-[#633806]'
+  if (type === 'base')      return 'text-[#1A1625] font-medium'
+  return 'text-[#5B5478]'
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -594,115 +607,115 @@ export default function DimensionCard({
     : undefined
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
+    <div className="bg-white rounded-xl border border-[#E2DFF0] overflow-hidden">
       {/* ── Collapsed header ───────────────────────────────────────────────── */}
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full px-5 pt-5 pb-4 text-left hover:bg-gray-50 transition-colors"
+        className="w-full px-5 pt-4 pb-3 text-left hover:bg-[#F9F8FD] transition-colors"
         aria-expanded={open}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">{label}</span>
-            <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+            <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
+            <span className="text-[11px] text-[#8B85A8] bg-[#F9F8FD] border border-[#E2DFF0] px-1.5 py-0.5 rounded-full">
               {weight}%
             </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {canOverride && (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => { e.stopPropagation(); setOverrideOpen(o => !o); setOverrideError(null) }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setOverrideOpen(o => !o); setOverrideError(null) } }}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50 transition-colors cursor-pointer"
-              >
-                Adjust score
+            {isOverridden && (
+              <span className="text-[11px] bg-[#EEEDFE] text-[#5B3FD4] px-2 py-0.5 rounded-full">
+                Manually adjusted
               </span>
             )}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-[14px] font-medium ${scoreTextColor(finalScore)}`}>
+              {finalScore}<span className="text-[#B8B3CE] font-normal text-[12px]">/100</span>
+            </span>
             <svg
-              className={`w-4 h-4 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+              className={`w-4 h-4 text-[#B8B3CE] transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor"
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
         </div>
-
-        <div className="flex items-baseline gap-2 mt-3">
-          <span className={`text-3xl font-bold ${scoreColor(finalScore)}`}>{finalScore}</span>
-          <span className="text-sm text-gray-400">/100</span>
-          {isOverridden && (
-            <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
-              Manually adjusted
-            </span>
-          )}
+        {/* Progress bar */}
+        <div className="mt-2.5 h-[3px] w-full bg-[#F9F8FD] rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full ${scoreBarColor(finalScore)}`}
+            style={{ width: `${finalScore}%` }}
+          />
         </div>
-
-        {fetched && (
-          <p className="text-xs text-gray-400 mt-1">Fetched {fetched}</p>
-        )}
       </button>
-
-      {/* ── Override form ──────────────────────────────────────────────────── */}
-      {overrideOpen && (
-        <div className="border-t border-indigo-100 bg-indigo-50 px-5 py-4 space-y-3">
-          <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Adjust score</p>
-          <div className="flex items-center gap-3">
-            <label className="text-xs text-gray-700 w-32 flex-shrink-0">New score (0–100)</label>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={newScoreVal}
-              onChange={(e) => setNewScoreVal(e.target.value)}
-              className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
-            />
-            <span className="text-xs text-gray-400">Current: {finalScore}</span>
-          </div>
-          <div>
-            <label className="text-xs text-gray-700 block mb-1">Reason (required, min 10 characters)</label>
-            <textarea
-              rows={2}
-              value={overrideReason2}
-              onChange={(e) => setOverrideReason2(e.target.value)}
-              placeholder="Explain why you are adjusting this score…"
-              className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none"
-            />
-          </div>
-          {overrideError && (
-            <p className="text-xs text-red-600">{overrideError}</p>
-          )}
-          <div className="flex gap-2">
-            <button
-              onClick={handleOverrideSave}
-              disabled={saving}
-              className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              onClick={() => { setOverrideOpen(false); setOverrideError(null); setOverrideReason2('') }}
-              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ── Expanded panel ─────────────────────────────────────────────────── */}
       {open && (
-        <div className="border-t border-gray-100 px-5 py-5 space-y-5">
+        <div className="border-t border-[#E2DFF0] px-5 py-5 space-y-5">
+
+          {/* Adjust score button (ANALYST+ only, in expanded panel) */}
+          {canOverride && !overrideOpen && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => { setOverrideOpen(true); setOverrideError(null) }}
+                className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+              >
+                Adjust score
+              </button>
+            </div>
+          )}
+
+          {/* Override form */}
+          {overrideOpen && (
+            <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3">
+              <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">Adjust score</p>
+              <div className="flex items-center gap-3">
+                <label className="text-[12px] text-[#5B5478] w-36 flex-shrink-0">New score (0–100)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={newScoreVal}
+                  onChange={(e) => setNewScoreVal(e.target.value)}
+                  className="w-24 rounded-lg border border-[#E2DFF0] px-2 py-1 text-[14px] text-[#1A1625] focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                />
+                <span className="text-[12px] text-[#B8B3CE]">Current: {finalScore}</span>
+              </div>
+              <div>
+                <label className="text-[12px] text-[#5B5478] block mb-1">Reason (required, min 10 characters)</label>
+                <textarea
+                  rows={2}
+                  value={overrideReason2}
+                  onChange={(e) => setOverrideReason2(e.target.value)}
+                  placeholder="Explain why you are adjusting this score…"
+                  className="w-full rounded-lg border border-[#E2DFF0] px-2 py-1.5 text-[14px] text-[#1A1625] focus:outline-none focus:ring-1 focus:ring-[#5B3FD4] resize-none bg-white"
+                />
+              </div>
+              {overrideError && <p className="text-[12px] text-[#791F1F]">{overrideError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleOverrideSave}
+                  disabled={saving}
+                  className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => { setOverrideOpen(false); setOverrideError(null); setOverrideReason2('') }}
+                  className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Override banner */}
           {isOverridden && (
-            <div className="rounded-md bg-purple-50 border border-purple-100 px-3 py-2 text-xs space-y-0.5">
-              <p className="font-medium text-purple-700">Manually adjusted</p>
-              <p className="text-purple-600">Original system score: {rawScore}</p>
-              {overrideReason && <p className="text-purple-600">{overrideReason}</p>}
+            <div className="rounded-xl bg-[#EEEDFE] border border-[#E2DFF0] px-3 py-2.5 space-y-0.5">
+              <p className="text-[12px] font-medium text-[#5B3FD4]">Manually adjusted</p>
+              <p className="text-[12px] text-[#5B3FD4]">Original system score: {rawScore}</p>
+              {overrideReason && <p className="text-[12px] text-[#5B5478]">{overrideReason}</p>}
               {overriddenAt && (
-                <p className="text-purple-400">
+                <p className="text-[11px] text-[#B8B3CE]">
                   {new Date(overriddenAt).toLocaleString('en-GB')}
                 </p>
               )}
@@ -711,7 +724,7 @@ export default function DimensionCard({
 
           {/* Score explanation */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-3">
               How this score was calculated
             </p>
             <ul className="space-y-2">
@@ -719,11 +732,11 @@ export default function DimensionCard({
                 <li key={i} className="flex items-start gap-2">
                   <StepIcon type={step.type} />
                   <div className="flex-1 min-w-0">
-                    <span className={`text-sm ${stepTextColor(step.type)}`}>{step.text}</span>
+                    <span className={`text-[13px] leading-relaxed ${stepTextColor(step.type)}`}>{step.text}</span>
                     {step.action && (
-                      <p className="mt-1 text-xs leading-relaxed">
-                        <span className="font-medium text-indigo-400">Suggested action:</span>{' '}
-                        <span className="text-gray-600">{step.action}</span>
+                      <p className="mt-1 text-[12px] leading-relaxed">
+                        <span className="font-medium text-[#5B3FD4]">Suggested action:</span>{' '}
+                        <span className="text-[#5B5478]">{step.action}</span>
                       </p>
                     )}
                   </div>
@@ -735,15 +748,15 @@ export default function DimensionCard({
           {/* TRUST_CERTS: portal breakdown table */}
           {scrapeMeta && (
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
                 Portal check results
               </p>
-              <div className="divide-y divide-gray-50 rounded-md border border-gray-100 overflow-hidden">
+              <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
                 {Object.entries(scrapeMeta).map(([portal, meta]) => {
                   const { text, color } = friendlyPortalStatus(meta)
                   return (
                     <div key={portal} className="flex items-start justify-between px-3 py-2 text-xs bg-white">
-                      <span className="text-gray-700 font-medium">
+                      <span className="text-[#5B5478] font-medium">
                         {PORTAL_LABELS[portal] ?? portal}
                       </span>
                       <span className={`ml-4 text-right ${color}`}>
@@ -754,7 +767,7 @@ export default function DimensionCard({
                 })}
               </div>
               {(sd.status as string) === 'inconclusive' && (
-                <p className="text-xs text-amber-700 font-medium mt-2">
+                <p className="text-[12px] text-[#633806] font-medium mt-2">
                   All automated checks were inconclusive — request certification documents directly from the vendor.
                 </p>
               )}
@@ -766,12 +779,12 @@ export default function DimensionCard({
             <div className="space-y-3">
               {sanctionsScreened.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                  <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-1.5">
                     Names screened
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {sanctionsScreened.map((name, i) => (
-                      <span key={i} className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">
+                      <span key={i} className="text-[12px] bg-[#F9F8FD] text-[#5B5478] border border-[#E2DFF0] px-2 py-0.5 rounded-full">
                         {name}
                       </span>
                     ))}
@@ -781,24 +794,24 @@ export default function DimensionCard({
 
               {sanctionsMatches.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                  <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-1.5">
                     Matches found
                   </p>
                   <div className="space-y-2">
                     {sanctionsMatches.map((m, i) => (
-                      <div key={i} className={`rounded-md px-3 py-2.5 text-xs border ${
+                      <div key={i} className={`rounded-xl px-3 py-2.5 text-xs border ${
                         m.level === 'confirmed'
-                          ? 'bg-red-50 border-red-200'
-                          : 'bg-amber-50 border-amber-200'
+                          ? 'bg-[#FCEBEB] border-[#FCEBEB]'
+                          : 'bg-[#FAEEDA] border-[#FAEEDA]'
                       }`}>
-                        <p className={`font-semibold ${m.level === 'confirmed' ? 'text-red-800' : 'text-amber-800'}`}>
+                        <p className={`font-semibold ${m.level === 'confirmed' ? 'text-[#791F1F]' : 'text-[#633806]'}`}>
                           {m.level === 'confirmed' ? 'Confirmed match' : 'Possible match'} · {m.source}
                         </p>
-                        <p className={`mt-0.5 ${m.level === 'confirmed' ? 'text-red-700' : 'text-amber-700'}`}>
+                        <p className={`mt-0.5 ${m.level === 'confirmed' ? 'text-[#791F1F]' : 'text-[#633806]'}`}>
                           &ldquo;{m.name}&rdquo; matched against &ldquo;{m.matchedAgainst}&rdquo; ({m.similarity}% similarity)
                         </p>
                         {m.level === 'possible' && (
-                          <p className="mt-1 text-amber-600 italic">
+                          <p className="mt-1 text-[#633806] italic">
                             Possible matches may be coincidental, especially for common names. Verify before escalating.
                           </p>
                         )}
@@ -811,9 +824,9 @@ export default function DimensionCard({
           )}
 
           {/* Data source footer */}
-          <div className="pt-1 border-t border-gray-50">
-            <p className="text-xs text-gray-400">
-              Source: <span className="text-gray-500">{source}</span>
+          <div className="pt-1 border-t border-[#E2DFF0]">
+            <p className="text-[11px] text-[#B8B3CE]">
+              Source: <span className="text-[#8B85A8]">{source}</span>
               {fetched && <> · Fetched {fetched}</>}
             </p>
           </div>

@@ -1,14 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import FidesSeal from '@/src/components/FidesSeal'
 
-type Step =
-  | 'choose'
-  | 'solo-form'
-  | 'org-choose'
-  | 'create-form'
-  | 'join-form'
-  | 'invite-success'
+type Step = 'choose' | 'solo-form' | 'org-choose' | 'create-form' | 'join-form' | 'invite-success'
 
 interface Props {
   initialName: string
@@ -17,9 +12,7 @@ interface Props {
 }
 
 export default function OnboardingFlow({ initialName, initialMode, initialToken }: Props) {
-  const [step, setStep] = useState<Step>(
-    initialMode === 'join' ? 'join-form' : 'choose',
-  )
+  const [step, setStep] = useState<Step>(initialMode === 'join' ? 'join-form' : 'choose')
   const [name, setName] = useState(initialName)
   const [orgName, setOrgName] = useState('')
   const [inviteToken, setInviteToken] = useState(initialToken ?? '')
@@ -96,215 +89,165 @@ export default function OnboardingFlow({ initialName, initialMode, initialToken 
     }
   }
 
+  const inputCls = "w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] focus:outline-none focus:ring-2 focus:ring-[#5B3FD4] focus:border-transparent"
+  const primaryBtnCls = "w-full py-2.5 px-4 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+  const labelCls = "block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1.5"
+  const cardCls = "bg-white rounded-xl border border-[#E2DFF0] px-6 py-5"
+  const backBtnCls = "text-[13px] text-[#8B85A8] hover:text-[#5B5478] mb-5 block"
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4">
-      <div className="max-w-2xl w-full">
-        <div className="text-center mb-10">
-          <h1 className="text-3xl font-bold text-gray-900">Welcome to Fides</h1>
-          <p className="mt-2 text-gray-500">Let&apos;s set up your workspace.</p>
+    <div className="min-h-screen bg-[#F4F3F8] flex items-center justify-center py-12 px-4">
+      <div className="max-w-lg w-full">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <FidesSeal size={64} />
+          </div>
+          <h1 className="text-[22px] font-medium text-[#1A1625]">Welcome to Fides</h1>
+          <p className="mt-1.5 text-[13px] text-[#8B85A8]">Let&apos;s set up your workspace.</p>
         </div>
 
-        {/* STEP: choose account type */}
+        {/* Choose account type */}
         {step === 'choose' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={() => setStep('solo-form')}
-              className="text-left rounded-xl border-2 border-gray-200 bg-white p-6 hover:border-indigo-500 hover:shadow-md transition-all"
+              className="text-left rounded-xl border border-[#E2DFF0] bg-white px-5 py-5 hover:border-[#5B3FD4] hover:shadow-sm transition-all"
             >
               <div className="text-2xl mb-3">👤</div>
-              <h2 className="text-lg font-semibold text-gray-900">Just me</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                I am an independent analyst or consultant working alone. My own private workspace.
+              <h2 className="text-[15px] font-medium text-[#1A1625]">Just me</h2>
+              <p className="mt-1 text-[13px] text-[#8B85A8]">
+                Independent analyst or consultant. My own private workspace.
               </p>
-              <span className="mt-4 inline-block text-sm font-medium text-indigo-600">
+              <span className="mt-4 inline-block text-[13px] font-medium text-[#5B3FD4]">
                 Set up my workspace →
               </span>
             </button>
 
             <button
               onClick={() => setStep('org-choose')}
-              className="text-left rounded-xl border-2 border-gray-200 bg-white p-6 hover:border-indigo-500 hover:shadow-md transition-all"
+              className="text-left rounded-xl border border-[#E2DFF0] bg-white px-5 py-5 hover:border-[#5B3FD4] hover:shadow-sm transition-all"
             >
               <div className="text-2xl mb-3">🏢</div>
-              <h2 className="text-lg font-semibold text-gray-900">My organisation</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                I am part of a team. We will share a vendor register and collaborate on assessments.
+              <h2 className="text-[15px] font-medium text-[#1A1625]">My organisation</h2>
+              <p className="mt-1 text-[13px] text-[#8B85A8]">
+                Part of a team. Share a vendor register and collaborate.
               </p>
-              <span className="mt-4 inline-block text-sm font-medium text-indigo-600">
+              <span className="mt-4 inline-block text-[13px] font-medium text-[#5B3FD4]">
                 Get started →
               </span>
             </button>
           </div>
         )}
 
-        {/* STEP: org sub-choice */}
+        {/* Org sub-choice */}
         {step === 'org-choose' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 space-y-4">
-            <button
-              onClick={() => setStep('choose')}
-              className="text-sm text-gray-400 hover:text-gray-600 mb-2"
-            >
-              ← Back
-            </button>
-            <h2 className="text-lg font-semibold text-gray-900">My organisation</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <div className={cardCls + ' space-y-4'}>
+            <button onClick={() => setStep('choose')} className={backBtnCls}>← Back</button>
+            <h2 className="text-[15px] font-medium text-[#1A1625]">My organisation</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <button
                 onClick={() => setStep('create-form')}
-                className="text-left rounded-lg border-2 border-gray-200 p-5 hover:border-indigo-500 transition-all"
+                className="text-left rounded-xl border border-[#E2DFF0] px-4 py-4 hover:border-[#5B3FD4] transition-all"
               >
-                <h3 className="font-medium text-gray-900">Create a new organisation</h3>
-                <p className="mt-1 text-sm text-gray-500">Set up a shared workspace and invite your team.</p>
+                <h3 className="text-[14px] font-medium text-[#1A1625]">Create a new organisation</h3>
+                <p className="mt-1 text-[13px] text-[#8B85A8]">Set up a shared workspace and invite your team.</p>
               </button>
               <button
                 onClick={() => setStep('join-form')}
-                className="text-left rounded-lg border-2 border-gray-200 p-5 hover:border-indigo-500 transition-all"
+                className="text-left rounded-xl border border-[#E2DFF0] px-4 py-4 hover:border-[#5B3FD4] transition-all"
               >
-                <h3 className="font-medium text-gray-900">Join with an invite code</h3>
-                <p className="mt-1 text-sm text-gray-500">You have a link or code from a colleague.</p>
+                <h3 className="text-[14px] font-medium text-[#1A1625]">Join with an invite code</h3>
+                <p className="mt-1 text-[13px] text-[#8B85A8]">You have a link or code from a colleague.</p>
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP: solo form */}
+        {/* Solo form */}
         {step === 'solo-form' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-8">
-            <button
-              onClick={() => setStep('choose')}
-              className="text-sm text-gray-400 hover:text-gray-600 mb-6 block"
-            >
-              ← Back
-            </button>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Your workspace</h2>
+          <div className={cardCls}>
+            <button onClick={() => setStep('choose')} className={backBtnCls}>← Back</button>
+            <h2 className="text-[15px] font-medium text-[#1A1625] mb-5">Your workspace</h2>
             <form onSubmit={handleSoloSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Your name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  required
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <label className={labelCls}>Your name</label>
+                <input type="text" value={name} onChange={e => setName(e.target.value)} required className={inputCls} />
               </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-              >
+              {error && <p className="text-[13px] text-[#791F1F]">{error}</p>}
+              <button type="submit" disabled={loading} className={primaryBtnCls}>
                 {loading ? 'Setting up…' : 'Get started'}
               </button>
             </form>
           </div>
         )}
 
-        {/* STEP: create org form */}
+        {/* Create org form */}
         {step === 'create-form' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-8">
-            <button
-              onClick={() => setStep('org-choose')}
-              className="text-sm text-gray-400 hover:text-gray-600 mb-6 block"
-            >
-              ← Back
-            </button>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Create your organisation</h2>
+          <div className={cardCls}>
+            <button onClick={() => setStep('org-choose')} className={backBtnCls}>← Back</button>
+            <h2 className="text-[15px] font-medium text-[#1A1625] mb-5">Create your organisation</h2>
             <form onSubmit={handleCreateOrgSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Organisation name
-                </label>
-                <input
-                  type="text"
-                  value={orgName}
-                  onChange={e => setOrgName(e.target.value)}
-                  required
-                  placeholder="Acme Corp"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <label className={labelCls}>Organisation name</label>
+                <input type="text" value={orgName} onChange={e => setOrgName(e.target.value)} required placeholder="Acme Corp" className={inputCls} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Your name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  required
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <label className={labelCls}>Your name</label>
+                <input type="text" value={name} onChange={e => setName(e.target.value)} required className={inputCls} />
               </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-              >
+              {error && <p className="text-[13px] text-[#791F1F]">{error}</p>}
+              <button type="submit" disabled={loading} className={primaryBtnCls}>
                 {loading ? 'Creating…' : 'Create organisation'}
               </button>
             </form>
           </div>
         )}
 
-        {/* STEP: join form */}
+        {/* Join form */}
         {step === 'join-form' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-8">
-            <button
-              onClick={() => setStep('org-choose')}
-              className="text-sm text-gray-400 hover:text-gray-600 mb-6 block"
-            >
-              ← Back
-            </button>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Join an organisation</h2>
+          <div className={cardCls}>
+            <button onClick={() => setStep('org-choose')} className={backBtnCls}>← Back</button>
+            <h2 className="text-[15px] font-medium text-[#1A1625] mb-5">Join an organisation</h2>
             <form onSubmit={handleJoinSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Invite code or paste invite link
-                </label>
+                <label className={labelCls}>Invite code or paste invite link</label>
                 <input
                   type="text"
                   value={inviteToken}
                   onChange={e => setInviteToken(e.target.value)}
                   required
                   placeholder="https://fides-eight.vercel.app/join?token=…"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className={inputCls}
                 />
               </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-              >
+              {error && <p className="text-[13px] text-[#791F1F]">{error}</p>}
+              <button type="submit" disabled={loading} className={primaryBtnCls}>
                 {loading ? 'Joining…' : 'Join'}
               </button>
             </form>
           </div>
         )}
 
-        {/* STEP: invite success */}
+        {/* Invite success */}
         {step === 'invite-success' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center space-y-5">
+          <div className={cardCls + ' text-center space-y-5'}>
             <div className="text-4xl">🎉</div>
-            <h2 className="text-lg font-semibold text-gray-900">Organisation created!</h2>
-            <p className="text-sm text-gray-500">
+            <h2 className="text-[15px] font-medium text-[#1A1625]">Organisation created!</h2>
+            <p className="text-[13px] text-[#8B85A8]">
               Share this invite link with your team. It expires in 7 days.
             </p>
-            <div className="flex items-center gap-2 bg-gray-50 rounded-md border border-gray-200 p-3">
-              <span className="flex-1 text-xs text-gray-700 font-mono truncate">{inviteUrl}</span>
+            <div className="flex items-center gap-2 bg-[#F9F8FD] rounded-lg border border-[#E2DFF0] p-3">
+              <span className="flex-1 text-[12px] text-[#5B5478] font-mono truncate">{inviteUrl}</span>
               <button
                 onClick={() => navigator.clipboard.writeText(inviteUrl)}
-                className="shrink-0 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                className="shrink-0 text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
               >
                 Copy
               </button>
             </div>
             <button
               onClick={() => refreshSession()}
-              className="w-full py-2.5 px-4 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+              className={primaryBtnCls}
             >
               Go to dashboard
             </button>

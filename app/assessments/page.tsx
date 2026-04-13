@@ -45,25 +45,35 @@ export default async function AssessmentsPage({
     .offset(offset)
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F4F3F8]">
+      <header className="bg-white border-b border-[#E2DFF0]">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="text-sm text-gray-500 hover:text-gray-700">
-              ← Dashboard
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm">F</span>
+              </div>
+              <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
+            </div>
+            <span className="text-[#E2DFF0]">·</span>
+            <Link href="/dashboard" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">
+              Dashboard
             </Link>
-            <h1 className="text-xl font-semibold text-gray-900">Assessments</h1>
+            <span className="text-[#E2DFF0]">·</span>
+            <h1 className="text-[15px] font-medium text-[#1A1625]">Assessments</h1>
           </div>
-          <Link
-            href="/assessments/new"
-            className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
-          >
-            New assessment
-          </Link>
+          {hasRole(ctx.user.role, 'ANALYST') && (
+            <Link
+              href="/assessments/new"
+              className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] transition-colors"
+            >
+              New assessment
+            </Link>
+          )}
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <AssessmentList
           rows={rows as AssessmentRow[]}
           currentTier={tier}

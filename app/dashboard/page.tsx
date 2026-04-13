@@ -14,6 +14,13 @@ const ROLE_LABELS: Record<string, string> = {
   VIEWER: 'Viewer',
 }
 
+const TIER_COLORS: Record<string, string> = {
+  LOW: 'bg-[#E6F1FB] text-[#0C447C]',
+  MEDIUM: 'bg-[#EAF3DE] text-[#27500A]',
+  HIGH: 'bg-[#FAEEDA] text-[#633806]',
+  CRITICAL: 'bg-[#FCEBEB] text-[#791F1F]',
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -41,7 +48,6 @@ export default async function DashboardPage({
     .from(users)
     .where(and(eq(users.orgId, org.id), isNull(users.deletedAt)))
 
-  // Check if this user has a pending upgrade invite token
   const [pendingUpgrade] = await db
     .select({ id: inviteTokens.id })
     .from(inviteTokens)
@@ -59,22 +65,22 @@ export default async function DashboardPage({
     .select({
       id: assessments.id,
       vendorName: assessments.vendorName,
+      companiesHouseNumber: assessments.companiesHouseNumber,
       riskTier: assessments.riskTier,
       overallScore: assessments.overallScore,
-      assessmentStatus: assessments.assessmentStatus,
       createdAt: assessments.createdAt,
     })
     .from(assessments)
     .where(and(eq(assessments.orgId, org.id), isNull(assessments.deletedAt)))
     .orderBy(desc(assessments.createdAt))
-    .limit(3)
+    .limit(5)
 
   const canCreateAssessment = hasRole(user.role, 'ANALYST')
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F4F3F8]">
+      <header className="bg-white border-b border-[#E2DFF0]">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {org.logoUrl ? (
               <Image
@@ -82,27 +88,21 @@ export default async function DashboardPage({
                 alt={`${org.name} logo`}
                 width={32}
                 height={32}
-                className="h-8 w-auto object-contain rounded"
+                className="h-8 w-auto object-contain rounded-lg"
               />
             ) : (
-              <Link
-                href="/settings/organisation"
-                title="Add your organisation logo"
-                className="h-8 w-8 rounded border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-indigo-400 hover:text-indigo-400 transition-colors"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </Link>
+              <div className="w-8 h-8 rounded-lg bg-[#5B3FD4] flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm">F</span>
+              </div>
             )}
-            <span className="text-xl font-semibold text-gray-900">Fides</span>
+            <span className="text-[15px] font-medium text-[#1A1625]">Fides</span>
           </div>
           <div className="flex items-center gap-4">
-            <Link href="/settings/profile" className="text-sm text-gray-500 hover:text-gray-700">
+            <Link href="/settings/profile" className="text-[13px] text-[#5B5478] hover:text-[#1A1625]">
               {user.displayName}
             </Link>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-            <a href="/api/auth/logout" className="text-sm text-gray-500 hover:text-gray-700">
+            <a href="/api/auth/logout" className="text-[13px] text-[#8B85A8] hover:text-[#5B5478]">
               Sign out
             </a>
           </div>
@@ -110,72 +110,65 @@ export default async function DashboardPage({
       </header>
 
       {showPendingBanner && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-sm text-amber-800 text-center">
+        <div className="bg-[#FAEEDA] border-b border-[#E2DFF0] px-4 py-3 text-[13px] text-[#633806] text-center">
           Your account is pending activation. The organisation admin has been notified to upgrade their plan.
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6">
-        <div className="bg-white rounded-lg shadow p-6">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-4">
+        {/* Workspace card */}
+        <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="text-lg font-medium text-gray-900">
+              <h2 className="text-[15px] font-medium text-[#1A1625]">
                 {isSolo ? 'My Workspace' : org.name}
               </h2>
               {!isSolo && (
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-[13px] text-[#8B85A8]">
                   {memberCount} of {org.memberLimit} members
                 </p>
               )}
             </div>
-            <span
-              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
-            >
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#EEEDFE] text-[#5B3FD4]">
               {ROLE_LABELS[user.role] ?? user.role}
             </span>
           </div>
 
-          <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <dl className="mt-4 grid grid-cols-2 gap-4 pt-4 border-t border-[#E2DFF0]">
             <div>
-              <dt className="text-sm font-medium text-gray-500">Display name</dt>
-              <dd className="mt-1 text-sm text-gray-900">{user.displayName}</dd>
+              <dt className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Display name</dt>
+              <dd className="text-[14px] text-[#1A1625]">{user.displayName}</dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-gray-500">Email</dt>
-              <dd className="mt-1 text-sm text-gray-900">{user.email}</dd>
+              <dt className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Email</dt>
+              <dd className="text-[14px] text-[#1A1625]">{user.email}</dd>
             </div>
           </dl>
-        </div>
 
-        <div className="flex gap-4">
-          {user.role === 'ADMIN' && (
-            <Link
-              href="/settings/organisation"
-              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-            >
-              Organisation settings →
+          <div className="flex gap-4 mt-4 pt-4 border-t border-[#E2DFF0]">
+            {user.role === 'ADMIN' && (
+              <Link href="/settings/organisation" className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium">
+                Organisation settings →
+              </Link>
+            )}
+            <Link href="/settings/profile" className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium">
+              Profile settings →
             </Link>
-          )}
-          <Link
-            href="/settings/profile"
-            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-          >
-            Profile settings →
-          </Link>
+          </div>
         </div>
 
-        {/* Assessments section */}
-        <div className="bg-white rounded-lg shadow p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-900">Assessments</h2>
+        {/* Assessments card */}
+        <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[15px] font-medium text-[#1A1625]">Recent assessments</h2>
             <div className="flex items-center gap-3">
-              <Link href="/assessments" className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+              <Link href="/assessments" className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium">
                 View all →
               </Link>
               {canCreateAssessment && (
                 <Link
                   href="/assessments/new"
-                  className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+                  className="px-4 py-2 rounded-lg bg-[#5B3FD4] text-white text-[13px] font-medium hover:bg-[#3C3489] transition-colors"
                 >
                   New assessment
                 </Link>
@@ -184,38 +177,35 @@ export default async function DashboardPage({
           </div>
 
           {recentAssessments.length === 0 ? (
-            <p className="text-sm text-gray-500">
+            <p className="text-[14px] text-[#8B85A8] py-4">
               No assessments yet.{' '}
               {canCreateAssessment && (
-                <Link href="/assessments/new" className="text-indigo-600 hover:text-indigo-800">
+                <Link href="/assessments/new" className="text-[#5B3FD4] hover:text-[#3C3489]">
                   Start your first assessment →
                 </Link>
               )}
             </p>
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-[#E2DFF0]">
               {recentAssessments.map((a) => (
-                <div key={a.id} className="flex items-center justify-between py-3">
+                <Link
+                  key={a.id}
+                  href={`/assessments/${a.id}`}
+                  className="flex items-center justify-between py-3 hover:bg-[#F9F8FD] -mx-2 px-2 rounded-lg transition-colors"
+                >
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{a.vendorName}</p>
-                    <p className="text-xs text-gray-400">{new Date(a.createdAt).toLocaleDateString('en-GB')}</p>
+                    <p className="text-[14px] font-medium text-[#1A1625]">{a.vendorName}</p>
+                    <p className="text-[12px] text-[#B8B3CE] mt-0.5">
+                      {a.companiesHouseNumber ? `CH: ${a.companiesHouseNumber} · ` : ''}
+                      {new Date(a.createdAt).toLocaleDateString('en-GB')}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {a.riskTier && (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        a.riskTier === 'LOW' ? 'bg-green-100 text-green-800'
-                        : a.riskTier === 'MEDIUM' ? 'bg-amber-100 text-amber-800'
-                        : a.riskTier === 'HIGH' ? 'bg-orange-100 text-orange-800'
-                        : 'bg-red-100 text-red-800'
-                      }`}>
-                        {a.riskTier}
-                      </span>
-                    )}
-                    <Link href={`/assessments/${a.id}`} className="text-sm text-indigo-600 hover:text-indigo-800">
-                      View
-                    </Link>
-                  </div>
-                </div>
+                  {a.riskTier && (
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-[13px] font-medium ${TIER_COLORS[a.riskTier] ?? 'bg-gray-100 text-gray-700'}`}>
+                      {a.riskTier}
+                    </span>
+                  )}
+                </Link>
               ))}
             </div>
           )}

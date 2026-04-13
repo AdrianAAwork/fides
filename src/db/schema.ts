@@ -158,6 +158,7 @@ export const assessments = pgTable('assessments', {
   riskTierOverrideReason: text('risk_tier_override_reason'),
   overallScore: smallint('overall_score'),
   execSummaryJson: jsonb('exec_summary_json'),
+  contractDetails: jsonb('contract_details'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
