@@ -315,6 +315,7 @@ export default async function AssessmentDetailPage({
 // ── Audit helpers ─────────────────────────────────────────────────────────────
 
 const ACTION_LABELS: Record<string, string> = {
+  ASSESSMENT_CREATED: 'Assessment created',
   SCORE_OVERRIDDEN: 'Score adjusted',
   CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
   CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',

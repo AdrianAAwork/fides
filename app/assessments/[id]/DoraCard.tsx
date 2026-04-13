@@ -231,7 +231,7 @@ export default function DoraCard({ assessmentId, existing, canClassify, canOverr
           DORA Article 28
         </a>
         <a
-          href="https://www.fca.org.uk/publications/finalised-guidance/fg16-5-guidance-outsourcing"
+          href="https://www.fca.org.uk/publications/supervisory-statements/ss2-21-outsourcing-and-third-party-risk-management"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
