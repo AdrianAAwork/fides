@@ -86,13 +86,35 @@ export default function OrgSettings({ org: initialOrg, currentUserId, initialMem
     try {
       const fd = new FormData()
       fd.append('logo', logoFile)
+      console.log('[logo upload] POST /api/org/logo — file:', logoFile.name, logoFile.type, logoFile.size)
       const res = await fetch('/api/org/logo', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (!res.ok) { setLogoError(data.error ?? 'Upload failed'); return }
-      setOrg(prev => ({ ...prev, logoUrl: data.logoUrl }))
+      console.log('[logo upload] response status:', res.status)
+
+      let data: Record<string, unknown> = {}
+      try {
+        data = await res.json()
+      } catch (parseErr) {
+        console.error('[logo upload] could not parse response JSON:', parseErr)
+        setLogoError('Upload failed — unexpected server response. Check the browser console.')
+        return
+      }
+
+      console.log('[logo upload] response body:', data)
+
+      if (!res.ok) {
+        setLogoError((data.error as string) ?? 'Upload failed.')
+        return
+      }
+
+      const newUrl = data.logoUrl as string
+      setOrg(prev => ({ ...prev, logoUrl: newUrl }))
       setShowLogoDialog(false)
       setLogoFile(null)
       setLogoPreview(null)
+      setLogoError('')
+    } catch (err) {
+      console.error('[logo upload] fetch threw:', err)
+      setLogoError('Upload failed — network error. Check the browser console.')
     } finally {
       setUploadingLogo(false)
     }

@@ -43,18 +43,43 @@ export async function POST(req: Request) {
     : 'jpg'
 
   const filename = `logos/${ctx.org.id}-${Date.now()}.${ext}`
-  const buffer = Buffer.from(await file.arrayBuffer())
 
-  const blob = await put(filename, buffer, {
-    access: 'public',
-    contentType: file.type,
-  })
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN
+  if (!blobToken) {
+    console.error('[logo upload] BLOB_READ_WRITE_TOKEN is not set')
+    return NextResponse.json({ error: 'Blob storage is not configured on this server.' }, { status: 500 })
+  }
+
+  let buffer: Buffer
+  try {
+    buffer = Buffer.from(await file.arrayBuffer())
+  } catch (err) {
+    console.error('[logo upload] failed to read file buffer:', err)
+    return NextResponse.json({ error: 'Failed to read uploaded file.' }, { status: 500 })
+  }
+
+  let blobUrl: string
+  try {
+    console.log('[logo upload] calling put:', filename, file.type, buffer.length, 'bytes')
+    const blob = await put(filename, buffer, {
+      access: 'public',
+      contentType: file.type,
+      token: blobToken,
+    })
+    blobUrl = blob.url
+    console.log('[logo upload] put succeeded, url:', blobUrl)
+  } catch (err) {
+    console.error('[logo upload] Vercel Blob put failed:', err)
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: `Blob upload failed: ${msg}` }, { status: 500 })
+  }
 
   const [updated] = await db
     .update(organisations)
-    .set({ logoUrl: blob.url })
+    .set({ logoUrl: blobUrl })
     .where(and(eq(organisations.id, ctx.org.id), isNull(organisations.deletedAt)))
     .returning()
 
+  console.log('[logo upload] DB updated, logoUrl:', updated?.logoUrl)
   return NextResponse.json({ logoUrl: updated.logoUrl })
 }
