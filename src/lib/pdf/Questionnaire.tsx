@@ -77,14 +77,33 @@ const styles = StyleSheet.create({
   },
 })
 
-function PdfSeal({ size = 20 }: { size?: number }) {
-  const cx = size / 2
-  const cy = size / 2
+function PdfSeal({ size = 100 }: { size?: number }) {
+  // Fixed coordinate space: outer r=50, inner r=38, centred at (50,50).
+  // `size` scales the rendered dimensions; 100 = 1:1 with the viewBox.
+  const scale = size / 100
+  const subFontSize = Math.max(5, Math.round(7 * scale))
   return (
-    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <Circle cx={cx} cy={cy} r={size * 0.46} stroke={PURPLE} strokeWidth={1} fill="none" strokeOpacity={0.5} />
-      <Circle cx={cx} cy={cy} r={size * 0.3} stroke={PURPLE} strokeWidth={0.5} fill="none" strokeOpacity={0.3} />
-    </Svg>
+    <View style={{ alignItems: 'center' }}>
+      {/* Ring container — Svg in normal flow, text overlay absolutely positioned on top */}
+      <View style={{ width: size, height: size, position: 'relative' }}>
+        <Svg width={size} height={size} viewBox="0 0 100 100">
+          <Circle cx={50} cy={50} r={50} stroke={PURPLE} strokeWidth={1.5} fill="none" strokeOpacity={0.45} />
+          <Circle cx={50} cy={50} r={38} stroke={PURPLE} strokeWidth={1} fill="none" strokeOpacity={0.3} />
+        </Svg>
+        {/* "F" (large serif) + "FIDES" (tracked caps) centred inside the rings */}
+        <View style={{ position: 'absolute', top: 0, left: 0, width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontFamily: 'Times-Roman', fontSize: Math.round(38 * scale), color: PURPLE, lineHeight: 1 }}>F</Text>
+          <Text style={{ fontSize: subFontSize, color: PURPLE, letterSpacing: 2, marginTop: 2 }}>FIDES</Text>
+        </View>
+      </View>
+      {/* Subtitle lines below the outer circle */}
+      <Text style={{ fontSize: subFontSize, color: PURPLE, letterSpacing: 1.5, opacity: 0.8, marginTop: 3, textAlign: 'center' }}>
+        VENDOR ASSESSMENT
+      </Text>
+      <Text style={{ fontSize: subFontSize, color: PURPLE, letterSpacing: 1.5, opacity: 0.65, marginTop: 1, textAlign: 'center' }}>
+        RISK MANAGEMENT
+      </Text>
+    </View>
   )
 }
 
@@ -131,11 +150,7 @@ export default function Questionnaire({ data }: { data: QuestionnairePdfData }) 
 
         {/* Seal centred */}
         <View style={{ alignItems: 'center', marginTop: 50, marginBottom: 24 }}>
-          <Svg width={80} height={80} viewBox="0 0 80 80">
-            <Circle cx={40} cy={40} r={36} stroke={PURPLE} strokeWidth={1.5} fill="none" strokeOpacity={0.45} />
-            <Circle cx={40} cy={40} r={26} stroke={PURPLE} strokeWidth={1} fill="none" strokeOpacity={0.3} />
-          </Svg>
-          <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, marginTop: 6, letterSpacing: 2, color: PURPLE }}>FIDES</Text>
+          <PdfSeal size={80} />
         </View>
 
         {/* Title */}
