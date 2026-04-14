@@ -44,44 +44,65 @@ function certFromKeyword(kw: string): string {
   return 'OTHER'
 }
 
-async function checkNcsc(orgName: string): Promise<{ meta: ScrapeMeta; certs: TrustCertFound[] }> {
-  const url = `https://www.ncsc.gov.uk/cyberessentials/search?q=${encodeURIComponent(orgName)}`
+async function checkIasme(orgName: string): Promise<{ meta: ScrapeMeta; certs: TrustCertFound[] }> {
+  const url = `https://iasme.co.uk/cyber-essentials/certified-organisations/?search=${encodeURIComponent(orgName)}`
   const result = await safeFetch(url)
   if ('error' in result) {
     return { meta: { attempted: true, found: false, error: result.error }, certs: [] }
   }
 
+  // 403, CAPTCHA, or other blocking response — do not assume certified
+  if (result.status === 403 || result.status === 429) {
+    return {
+      meta: { attempted: true, http_status: result.status, found: false, error: `Blocked (HTTP ${result.status})` },
+      certs: [],
+    }
+  }
+
+  if (result.status !== 200) {
+    return {
+      meta: { attempted: true, http_status: result.status, found: false, error: null },
+      certs: [],
+    }
+  }
+
   try {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(result.text)
-    } catch {
-      // Not JSON — parse HTML
-      const $ = cheerio.load(result.text)
-      const found = $('body').text().toLowerCase().includes(orgName.toLowerCase())
+    const $ = cheerio.load(result.text)
+
+    // Look for the organisation name specifically in result items, not the entire page
+    // (the search query itself appears in the input field — don't count that as a match)
+    const orgLower = orgName.toLowerCase()
+
+    // Remove the search form from consideration to avoid matching the query echoed in the input
+    $('form, input, [type="search"]').remove()
+
+    // Check for CAPTCHA indicators
+    const bodyText = $('body').text()
+    const lowerBody = bodyText.toLowerCase()
+    if (lowerBody.includes('captcha') || lowerBody.includes('verify you are human') || lowerBody.includes('access denied')) {
       return {
-        meta: { attempted: true, http_status: result.status, found, error: null },
-        certs: found ? [{ certType: 'CYBER_ESSENTIALS', source: 'ncsc' }] : [],
+        meta: { attempted: true, http_status: result.status, found: false, error: 'Blocked by CAPTCHA or access control' },
+        certs: [],
       }
     }
 
-    const items = Array.isArray((parsed as Record<string, unknown>).results)
-      ? (parsed as Record<string, unknown[]>).results
-      : []
-    const found = items.length > 0
-    const certs: TrustCertFound[] = found
-      ? items.slice(0, 5).map((item) => {
-          const i = item as Record<string, unknown>
-          return {
-            certType: i.plus ? 'CYBER_ESSENTIALS_PLUS' : 'CYBER_ESSENTIALS',
-            source: 'ncsc',
-            expiryDate: i.expiry_date as string | undefined,
-            issuingBody: i.certification_body as string | undefined,
-          }
-        })
-      : []
+    // Look for org name in result listings (links, headings, list items, table cells)
+    const resultSelectors = ['a', 'h1', 'h2', 'h3', 'h4', 'li', 'td', 'th', '.result', '.organisation', '.company']
+    let found = false
+    for (const sel of resultSelectors) {
+      $(sel).each((_, el) => {
+        const text = $(el).text().toLowerCase()
+        if (text.includes(orgLower)) {
+          found = true
+        }
+      })
+      if (found) break
+    }
 
-    return { meta: { attempted: true, http_status: result.status, found, error: null }, certs }
+    return {
+      meta: { attempted: true, http_status: result.status, found, error: null },
+      certs: found ? [{ certType: 'CYBER_ESSENTIALS', source: 'iasme' }] : [],
+    }
   } catch (err) {
     return {
       meta: { attempted: true, http_status: result.status, found: false, error: err instanceof Error ? err.message : String(err) },
@@ -193,8 +214,8 @@ export async function fetchTrustPortals(
   website?: string
 ): Promise<TrustPortalsData> {
   try {
-    const [ncscResult, vantaResult, safebaseResult] = await Promise.all([
-      checkNcsc(orgName),
+    const [iasmeResult, vantaResult, safebaseResult] = await Promise.all([
+      checkIasme(orgName),
       checkVanta(orgName),
       checkSafebase(orgName),
     ])
@@ -209,7 +230,7 @@ export async function fetchTrustPortals(
     }
 
     const allCerts = [
-      ...ncscResult.certs,
+      ...iasmeResult.certs,
       ...vantaResult.certs,
       ...safebaseResult.certs,
       ...vendorResult.certs,
@@ -225,7 +246,7 @@ export async function fetchTrustPortals(
 
     const anyFound = uniqueCerts.length > 0
     const anyAttempted =
-      ncscResult.meta.attempted ||
+      iasmeResult.meta.attempted ||
       vantaResult.meta.attempted ||
       safebaseResult.meta.attempted ||
       vendorResult.meta.attempted
@@ -240,7 +261,7 @@ export async function fetchTrustPortals(
       certs_found: uniqueCerts,
       status,
       scrape_metadata: {
-        ncsc: ncscResult.meta,
+        iasme: iasmeResult.meta,
         vanta: vantaResult.meta,
         safebase: safebaseResult.meta,
         vendor_site: vendorResult.meta,

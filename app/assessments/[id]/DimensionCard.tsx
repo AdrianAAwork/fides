@@ -53,7 +53,7 @@ const CERT_LABELS: Record<string, string> = {
 }
 
 const PORTAL_LABELS: Record<string, string> = {
-  ncsc: 'NCSC Cyber Essentials registry',
+  iasme: 'IASME Cyber Essentials registry',
   vanta: 'Vanta trust portal',
   safebase: 'SafeBase portal',
   vendor_site: 'Vendor website',
@@ -64,7 +64,7 @@ const SOURCE_LABELS: Record<string, string> = {
   BREACH_HISTORY: 'Have I Been Pwned (HIBP)',
   SANCTIONS: 'OFSI · OFAC · EU (Neon DB)',
   OWNERSHIP: 'GLEIF',
-  TRUST_CERTS: 'NCSC · Vanta · SafeBase · vendor website',
+  TRUST_CERTS: 'IASME · Vanta · SafeBase · vendor website',
   NEWS_SENTIMENT: 'NewsAPI + Claude AI',
 }
 
@@ -122,39 +122,89 @@ const ERROR_LABELS: Record<ErrorCategory, string> = {
 
 // ── Portal status helper ──────────────────────────────────────────────────────
 
-function friendlyPortalStatus(meta: {
-  attempted: boolean
-  http_status?: number
-  found: boolean
-  keywords_found?: string[]
-  error?: string | null
-}): { text: string; color: string } {
-  if (!meta.attempted) return { text: 'Not checked', color: 'text-gray-400' }
+function friendlyPortalStatus(
+  meta: {
+    attempted: boolean
+    http_status?: number
+    found: boolean
+    keywords_found?: string[]
+    error?: string | null
+  },
+  portal: string,
+): { text: string; color: string } {
+  if (!meta.attempted) {
+    if (portal === 'vendor_site') return { text: 'Vendor website not checked', color: 'text-gray-400' }
+    return { text: 'Not checked', color: 'text-gray-400' }
+  }
+
+  const status = meta.http_status ?? 0
+  const errMsg = (meta.error ?? '').toLowerCase()
+  const unreachable =
+    errMsg.includes('abort') ||
+    errMsg.includes('timeout') ||
+    status === 403 ||
+    status === 429 ||
+    status >= 500 ||
+    errMsg.includes('forbidden') ||
+    errMsg.includes('blocked') ||
+    errMsg.includes('captcha')
+
   if (meta.found) {
-    const kw = meta.keywords_found?.slice(0, 2).join(', ')
-    return {
-      text: kw ? `Found — ${kw}` : 'Found',
-      color: 'text-green-700 font-medium',
+    switch (portal) {
+      case 'iasme':
+        return { text: 'Cyber Essentials certified — verified via IASME registry', color: 'text-green-700 font-medium' }
+      case 'vanta':
+        return { text: 'Listed on Vanta trust portal', color: 'text-green-700 font-medium' }
+      case 'safebase':
+        return { text: 'Listed on SafeBase trust portal', color: 'text-green-700 font-medium' }
+      case 'vendor_site':
+        return { text: 'Trust or security page found on vendor website', color: 'text-green-700 font-medium' }
+      default: {
+        const kw = meta.keywords_found?.slice(0, 2).join(', ')
+        return { text: kw ? `Found — ${kw}` : 'Found', color: 'text-green-700 font-medium' }
+      }
     }
   }
 
-  // Not found — determine friendly reason
-  const status = meta.http_status ?? 0
-  const errMsg = (meta.error ?? '').toLowerCase()
+  if (unreachable) {
+    switch (portal) {
+      case 'iasme':
+        return { text: 'Search inconclusive — IASME registry could not be reached. Verify manually at iasme.co.uk', color: 'text-amber-700' }
+      case 'vanta':
+        return { text: 'Search inconclusive — Vanta could not be reached', color: 'text-amber-700' }
+      case 'safebase':
+        return { text: 'Search inconclusive — SafeBase could not be reached', color: 'text-amber-700' }
+      case 'vendor_site':
+        return { text: 'Search inconclusive — vendor website could not be reached', color: 'text-amber-700' }
+      default:
+        return { text: 'Search inconclusive — could not be reached', color: 'text-amber-700' }
+    }
+  }
 
-  if (errMsg.includes('abort') || errMsg.includes('timeout')) {
-    return { text: 'Could not be reached in time', color: 'text-amber-700' }
+  switch (portal) {
+    case 'iasme':
+      return {
+        text: 'Search inconclusive — not found in IASME registry. Vendor may hold certification under a different legal name or certificate may have recently expired. Verify manually at iasme.co.uk',
+        color: 'text-gray-500',
+      }
+    case 'vanta':
+      return {
+        text: 'Search inconclusive — not found on Vanta. Vendor may use a different trust platform or custom domain. Try trust.[vendor].com or security.[vendor].com',
+        color: 'text-gray-500',
+      }
+    case 'safebase':
+      return {
+        text: 'Search inconclusive — not found on SafeBase. Vendor may use a different trust platform or custom domain. Try trust.[vendor].com or security.[vendor].com',
+        color: 'text-gray-500',
+      }
+    case 'vendor_site':
+      return {
+        text: 'Search inconclusive — no trust page found at common paths. Vendor may host certifications on a custom subdomain or behind a request-only portal.',
+        color: 'text-gray-500',
+      }
+    default:
+      return { text: 'Search inconclusive — not found', color: 'text-gray-500' }
   }
-  if (status === 403 || status === 429 || errMsg.includes('forbidden') || errMsg.includes('blocked')) {
-    return { text: 'Access blocked by portal security', color: 'text-amber-700' }
-  }
-  if (status === 404 || status === 0) {
-    return { text: 'Not listed on this platform', color: 'text-gray-500' }
-  }
-  if (status >= 500) {
-    return { text: 'Platform temporarily unavailable', color: 'text-amber-700' }
-  }
-  return { text: 'Not listed on this platform', color: 'text-gray-500' }
 }
 
 // ── Explanation builders ──────────────────────────────────────────────────────
@@ -856,7 +906,7 @@ export default function DimensionCard({
               </p>
               <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
                 {Object.entries(scrapeMeta).map(([portal, meta]) => {
-                  const { text, color } = friendlyPortalStatus(meta)
+                  const { text, color } = friendlyPortalStatus(meta, portal)
                   return (
                     <div key={portal} className="flex items-start justify-between px-3 py-2 text-xs bg-white">
                       <span className="text-[#5B5478] font-medium">
@@ -924,6 +974,13 @@ export default function DimensionCard({
                 </div>
               )}
             </div>
+          )}
+
+          {/* TRUST_CERTS: automated checks disclaimer */}
+          {dimension === 'TRUST_CERTS' && (
+            <p className="text-[12px] text-[#8B85A8] leading-relaxed border border-[#E2DFF0] rounded-xl px-3 py-2.5 bg-[#F9F8FD]">
+              Automated checks cover known public directories only. Vendors may hold valid certifications on private portals, custom subdomains (e.g. trust.vendor.com), or available on request. Manual verification is recommended for Important and Critical vendors.
+            </p>
           )}
 
           {/* Manual certifications (TRUST_CERTS only) */}

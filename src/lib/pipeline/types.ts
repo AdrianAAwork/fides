@@ -124,7 +124,7 @@ export interface TrustPortalsData {
   certs_found: TrustCertFound[]
   status: 'found' | 'inconclusive' | 'not_found'
   scrape_metadata: {
-    ncsc?: ScrapeMeta
+    iasme?: ScrapeMeta
     vanta?: ScrapeMeta
     safebase?: ScrapeMeta
     vendor_site?: ScrapeMeta
