@@ -1,6 +1,6 @@
 # Fides — Vendor Risk Assessment Platform
 
-<!-- TODO: Add a screenshot here before making the repo public -->
+![Fides — Vendor Risk Assessment Report](docs/showcase_screenshot.png)
 
 AI-assisted vendor risk assessment for financial services teams. Fides automates the time-consuming
 data gathering required for third-party due diligence and produces a structured, auditable risk report
