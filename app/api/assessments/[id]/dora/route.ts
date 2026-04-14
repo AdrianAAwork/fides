@@ -63,7 +63,7 @@ function buildJustification(a: DoraAnswers, c: DoraClass): string {
       parts.push(`it provides ${a.serviceType} services for which no readily available substitute exists`)
     }
     return (
-      `This vendor has been classified as IMPORTANT under DORA Article 28 and FCA outsourcing guidance (FG16/5). ` +
+      `This vendor has been classified as IMPORTANT under DORA Article 28 and FCA outsourcing guidance SS2/21. ` +
       `Specifically, ${parts.join('; ')}. ` +
       `Material due diligence, ongoing monitoring, and documented exit strategies are required.`
     )
@@ -72,7 +72,7 @@ function buildJustification(a: DoraAnswers, c: DoraClass): string {
   return (
     'This vendor has been classified as STANDARD. ' +
     'Based on the information provided, it does not meet the criteria for CRITICAL or IMPORTANT classification ' +
-    'under DORA Article 28 or FCA outsourcing guidance (FG16/5). ' +
+    'under DORA Article 28 or FCA outsourcing guidance SS2/21. ' +
     'Standard contractual protections and periodic due diligence reviews apply.'
   )
 }

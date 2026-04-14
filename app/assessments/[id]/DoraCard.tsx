@@ -137,7 +137,7 @@ export default function DoraCard({ assessmentId, existing, canClassify, canOverr
           <div className="space-y-3">
             <p className="text-sm text-gray-500">
               Complete the classification questionnaire to determine whether this vendor meets the criteria for DORA
-              Article 28 or FCA outsourcing guidance (FG16/5) oversight requirements.
+              Article 28 or FCA outsourcing guidance SS2/21 oversight requirements.
             </p>
             {canClassify && (
               <button
