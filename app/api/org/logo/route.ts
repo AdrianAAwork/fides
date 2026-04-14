@@ -6,6 +6,13 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 
+// TODO: SECURITY (MEDIUM) — file.type is the Content-Type header from the multipart form part,
+// which is entirely attacker-controlled. An adversary can upload an SVG containing malicious
+// JavaScript with Content-Type: image/png, bypassing the ALLOWED_TYPES check. The blob is then
+// stored and served with whatever content-type was declared. Mitigation: read the first ~12 bytes
+// of the buffer and check magic bytes (e.g. 0x89 0x50 0x4E 0x47 for PNG; FFD8FF for JPEG) before
+// accepting the upload. Also consider stripping SVG from ALLOWED_TYPES since SVG supports inline
+// script and can be used for XSS when served as image/svg+xml.
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml']
 const MAX_BYTES = 2 * 1024 * 1024 // 2 MB
 

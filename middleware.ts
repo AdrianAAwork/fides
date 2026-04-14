@@ -51,7 +51,14 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Exclude: static assets, Auth0 routes, onboarding API (needs unauthenticated access)
+  // TODO: SECURITY (LOW) — api/onboarding is excluded from the Auth0 middleware because these
+  // routes must be reachable before the session cookie carries an org claim. The routes protect
+  // themselves by calling getSession() and returning 401 for unauthenticated requests. This is
+  // intentional but represents a defence-in-depth gap: if Auth0's getSession() ever returns a
+  // falsy session for a legitimate authenticated request (e.g. cookie parsing edge case), the
+  // routes fall back to 401 rather than being backed by the middleware redirect. Consider whether
+  // /api/onboarding/* can be moved to the protected matcher with an exemption only for the
+  // unauthenticated invite-lookup pre-check if one exists.
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|api/auth|api/onboarding).*)',
   ],

@@ -18,6 +18,13 @@ export async function PUT(
 
   const { id: assessmentId, dimension } = await params
 
+  const VALID_DIMENSIONS = new Set([
+    'FINANCIAL_HEALTH', 'BREACH_HISTORY', 'SANCTIONS', 'OWNERSHIP', 'TRUST_CERTS', 'NEWS_SENTIMENT',
+  ])
+  if (!VALID_DIMENSIONS.has(dimension)) {
+    return NextResponse.json({ error: 'Invalid dimension' }, { status: 400 })
+  }
+
   let body: Record<string, unknown>
   try {
     body = await req.json()

@@ -30,6 +30,9 @@ export async function PUT(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  // TODO: SECURITY (LOW) — slaUptime, rto, rpo, accountManagerName, accountManagerEmail have no
+  // length caps (only notes is capped at 500). Very long strings stored in JSONB waste storage
+  // and could cause slow PDF rendering. Add .slice(0, N) guards for each field.
   const contractDetails = {
     slaUptime: typeof body.slaUptime === 'string' ? body.slaUptime.trim() : undefined,
     rto: typeof body.rto === 'string' ? body.rto.trim() : undefined,

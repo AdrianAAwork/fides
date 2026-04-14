@@ -58,7 +58,17 @@ export async function POST(
   const auditPeriodStart = typeof body.auditPeriodStart === 'string' && body.auditPeriodStart ? body.auditPeriodStart : null
   const auditPeriodEnd = typeof body.auditPeriodEnd === 'string' && body.auditPeriodEnd ? body.auditPeriodEnd : null
   const expiryDate = typeof body.expiryDate === 'string' && body.expiryDate ? body.expiryDate : null
-  const sourceUrl = typeof body.sourceUrl === 'string' ? body.sourceUrl.trim().slice(0, 1000) || null : null
+  const rawSourceUrl = typeof body.sourceUrl === 'string' ? body.sourceUrl.trim().slice(0, 1000) || null : null
+  // Validate sourceUrl to http/https only — prevents stored XSS via javascript: scheme links
+  // rendered as <a href={sourceUrl}> in DimensionCard.tsx
+  if (rawSourceUrl !== null) {
+    let urlScheme: string | null = null
+    try { urlScheme = new URL(rawSourceUrl).protocol } catch { /* invalid URL */ }
+    if (urlScheme !== 'http:' && urlScheme !== 'https:') {
+      return NextResponse.json({ error: 'sourceUrl must be a valid http or https URL' }, { status: 400 })
+    }
+  }
+  const sourceUrl = rawSourceUrl
   const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) || null : null
 
   const result = await db.transaction(async (tx) => {
