@@ -1011,7 +1011,7 @@ export default function DimensionCard({
                       <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Notes <span className="normal-case text-[#B8B3CE]">(optional)</span></label>
                       <input
                         type="text"
-                        placeholder='e.g. "Found on trust.mypos.com"'
+                        placeholder='e.g. "Found on vendor trust portal"'
                         value={certForm.notes}
                         onChange={e => setCertForm(p => ({ ...p, notes: e.target.value.slice(0, 500) }))}
                         className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
