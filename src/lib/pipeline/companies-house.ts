@@ -39,8 +39,7 @@ export async function fetchCompaniesHouseProfile(
     const pscItems = ((pscRes as Record<string, unknown>).items ?? []) as Record<string, unknown>[]
     const filItems = (((filingsRes as Record<string, unknown>).items ?? []) as Record<string, unknown>[]).slice(0, 5)
 
-    // Extract website from registered data or links
-    const links = p.links as Record<string, unknown> | undefined
+    // Extract website from registered data
     const website = (p.website as string | undefined) ?? undefined
 
     return {

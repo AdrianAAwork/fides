@@ -89,14 +89,6 @@ function scoreBarColor(s: number): string {
   return 'bg-[#A32D2D]'
 }
 
-// Keep for internal explanation steps
-function scoreColor(s: number) {
-  if (s >= 75) return 'text-green-600'
-  if (s >= 50) return 'text-amber-600'
-  if (s >= 25) return 'text-orange-600'
-  return 'text-red-600'
-}
-
 // ── Error categorisation ──────────────────────────────────────────────────────
 
 type ErrorCategory = 'timeout' | 'auth' | 'not_found' | 'rate_limit' | 'server' | 'other'
@@ -641,7 +633,7 @@ const EMPTY_CERT_FORM: CertForm = {
 
 export default function DimensionCard({
   dimension, label, weight, finalScore, rawScore, isOverridden, overrideReason, overriddenAt,
-  sourceData, fetchedAt, scoreId, assessmentId, canOverride, certifications = [],
+  sourceData, fetchedAt, scoreId: _scoreId, assessmentId, canOverride, certifications = [],
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)

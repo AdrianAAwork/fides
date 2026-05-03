@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/src/db'
-import { certifications, certAlerts, assessments } from '@/src/db/schema'
-import { and, isNull, isNotNull, lte, eq } from 'drizzle-orm'
+import { certifications, certAlerts } from '@/src/db/schema'
+import { and, isNull, isNotNull, lte } from 'drizzle-orm'
 import { sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'

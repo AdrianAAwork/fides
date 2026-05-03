@@ -10,7 +10,6 @@ import type {
   NewsSentimentResult,
   DimensionScore,
   PipelineScores,
-  TrustCertFound,
 } from './types'
 
 const HIGH_SCORING_JURISDICTIONS = new Set([

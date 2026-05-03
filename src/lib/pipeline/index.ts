@@ -14,7 +14,6 @@ import { fetchNews, fetchHibp } from './news'
 import { fetchTrustPortals } from './trust-portals'
 import { callGoingConcern, callNewsSentiment, callExecSummary } from './claude'
 import { calculateScores, shouldTriggerQuestionnaire } from './scoring'
-import type { PipelineResult } from './types'
 import { eq, and } from 'drizzle-orm'
 
 export interface PipelineInput {
