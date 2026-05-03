@@ -1,10 +1,10 @@
 import React from 'react'
 
-interface FidesSealProps {
+interface FidesSealMonoProps {
   size?: number
 }
 
-export default function FidesSeal({ size = 60 }: FidesSealProps) {
+export default function FidesSealMono({ size = 60 }: FidesSealMonoProps) {
   const id = React.useId().replace(/:/g, '')
   return (
     <svg
@@ -15,17 +15,17 @@ export default function FidesSeal({ size = 60 }: FidesSealProps) {
     >
       {/* Outer border */}
       <circle cx="70" cy="70" r="64" fill="none"
-        stroke="#5B3FD4" strokeWidth="1.5" opacity="0.45"/>
+        stroke="#FFFFFF" strokeWidth="1.5" opacity="0.55"/>
 
       {/* Inner border */}
       <circle cx="70" cy="70" r="48" fill="none"
-        stroke="#5B3FD4" strokeWidth="1" opacity="0.3"/>
+        stroke="#FFFFFF" strokeWidth="1" opacity="0.4"/>
 
       {/* Top text path — radius 52, hugs the inner ring */}
       <path id={`top-${id}`}
         d="M 18,70 A 52,52 0 0 1 122,70" fill="none"/>
       <text fontFamily="Inter,sans-serif" fontSize="7"
-        fill="#5B3FD4" fillOpacity="0.72" letterSpacing="3">
+        fill="#FFFFFF" fillOpacity="0.85" letterSpacing="3">
         <textPath
           href={`#top-${id}`}
           startOffset="50%"
@@ -39,7 +39,7 @@ export default function FidesSeal({ size = 60 }: FidesSealProps) {
       <path id={`bot-${id}`}
         d="M 14,70 A 56,56 0 0 0 126,70" fill="none"/>
       <text fontFamily="Inter,sans-serif" fontSize="7"
-        fill="#5B3FD4" fillOpacity="0.58" letterSpacing="3">
+        fill="#FFFFFF" fillOpacity="0.7" letterSpacing="3">
         <textPath
           href={`#bot-${id}`}
           startOffset="50%"
@@ -52,21 +52,21 @@ export default function FidesSeal({ size = 60 }: FidesSealProps) {
 
       {/* Left ornament */}
       <text fontFamily="Inter,sans-serif" fontSize="8"
-        fill="#5B3FD4" fillOpacity="0.6"
+        fill="#FFFFFF" fillOpacity="0.7"
         textAnchor="middle"
         dominantBaseline="central"
         x="14" y="70">✦</text>
 
       {/* Right ornament */}
       <text fontFamily="Inter,sans-serif" fontSize="8"
-        fill="#5B3FD4" fillOpacity="0.6"
+        fill="#FFFFFF" fillOpacity="0.7"
         textAnchor="middle"
         dominantBaseline="central"
         x="126" y="70">✦</text>
 
       {/* Centre F monogram */}
       <text fontFamily="Georgia,serif" fontSize="44"
-        fill="#5B3FD4" fillOpacity="0.85"
+        fill="#FFFFFF" fillOpacity="0.95"
         textAnchor="middle"
         dominantBaseline="central"
         x="70" y="70">F</text>
