@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/src/db'
 import { organisations, users } from '@/src/db/schema'
 import { eq } from 'drizzle-orm'
+import { isDisposableEmail } from '@/src/lib/disposableEmail'
 
 function generateSlug(name: string): string {
   const base = name
@@ -24,6 +25,13 @@ export async function POST(req: Request) {
 
   const auth0Id: string = session.user.sub
   const email: string = session.user.email ?? ''
+
+  if (isDisposableEmail(email)) {
+    return NextResponse.json(
+      { error: 'Disposable email addresses are not supported. Please sign up with your work or personal email.' },
+      { status: 400 }
+    )
+  }
 
   const body = await req.json()
   const name: string = (body.name ?? '').trim()

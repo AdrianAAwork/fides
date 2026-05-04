@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/src/db'
 import { inviteTokens, organisations, users } from '@/src/db/schema'
 import { and, count, eq, gt, isNull } from 'drizzle-orm'
+import { isDisposableEmail } from '@/src/lib/disposableEmail'
 
 export async function POST(req: Request) {
   const session = await getSession()
@@ -13,6 +14,13 @@ export async function POST(req: Request) {
   const auth0Id: string = session.user.sub
   const email: string = session.user.email ?? ''
   const displayName: string = session.user.name ?? email
+
+  if (isDisposableEmail(email)) {
+    return NextResponse.json(
+      { error: 'Disposable email addresses are not supported. Please sign up with your work or personal email.' },
+      { status: 400 }
+    )
+  }
 
   const body = await req.json()
   let rawToken: string = (body.token ?? '').trim()

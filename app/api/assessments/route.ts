@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import { runPipeline } from '@/src/lib/pipeline'
+import { checkGlobalCeiling } from '@/src/lib/globalRateLimit'
 import { db } from '@/src/db'
 import { assessments, users, rateLimits } from '@/src/db/schema'
 import { and, eq, isNull, desc, sql } from 'drizzle-orm'
@@ -16,6 +17,17 @@ export async function POST(req: Request) {
   if (!ctx) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
   if (!hasRole(ctx.user.role, 'ANALYST')) {
     return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
+  }
+
+  if (!ctx.session.user.email_verified) {
+    return NextResponse.json({ error: 'Please verify your email before generating reports.' }, { status: 403 })
+  }
+
+  if (await checkGlobalCeiling()) {
+    return NextResponse.json(
+      { error: "We're experiencing high demand right now. Please try again tomorrow." },
+      { status: 429 }
+    )
   }
 
   let body: Record<string, unknown>

@@ -307,7 +307,13 @@ export const inviteTokens = pgTable('invite_tokens', {
   uniqueToken: unique().on(table.token),
 }))
 
-// 13. sanctions_entries
+// 13. global_rate_limits — one row per UTC day, incremented on every report generation
+export const globalRateLimits = pgTable('global_rate_limits', {
+  date: date('date').primaryKey(),
+  count: smallint('count').notNull().default(0),
+})
+
+// 14. sanctions_entries
 export const sanctionsEntries = pgTable('sanctions_entries', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 500 }).notNull(),
