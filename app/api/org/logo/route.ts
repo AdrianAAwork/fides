@@ -6,15 +6,19 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 
-// TODO: SECURITY (MEDIUM) — file.type is the Content-Type header from the multipart form part,
-// which is entirely attacker-controlled. An adversary can upload an SVG containing malicious
-// JavaScript with Content-Type: image/png, bypassing the ALLOWED_TYPES check. The blob is then
-// stored and served with whatever content-type was declared. Mitigation: read the first ~12 bytes
-// of the buffer and check magic bytes (e.g. 0x89 0x50 0x4E 0x47 for PNG; FFD8FF for JPEG) before
-// accepting the upload. Also consider stripping SVG from ALLOWED_TYPES since SVG supports inline
-// script and can be used for XSS when served as image/svg+xml.
-const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml']
 const MAX_BYTES = 2 * 1024 * 1024 // 2 MB
+
+function detectImageType(buf: Buffer): string | null {
+  // PNG: 89 50 4E 47
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png'
+  // JPEG: FF D8 FF
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg'
+  // WebP: RIFF....WEBP
+  if (buf.length >= 12 &&
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'
+  return null
+}
 
 export async function POST(req: Request) {
   const ctx = await getDbContext()
@@ -31,30 +35,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'No file provided' }, { status: 400 })
   }
 
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return NextResponse.json(
-      { error: 'File must be PNG, JPEG, or SVG' },
-      { status: 400 },
-    )
-  }
-
   if (file.size > MAX_BYTES) {
-    return NextResponse.json(
-      { error: 'File must be under 2MB' },
-      { status: 400 },
-    )
-  }
-
-  const ext = file.type === 'image/svg+xml' ? 'svg'
-    : file.type === 'image/png' ? 'png'
-    : 'jpg'
-
-  const filename = `logos/${ctx.org.id}-${Date.now()}.${ext}`
-
-  const blobToken = process.env.BLOB_READ_WRITE_TOKEN
-  if (!blobToken) {
-    console.error('[logo upload] BLOB_READ_WRITE_TOKEN is not set')
-    return NextResponse.json({ error: 'Blob storage is not configured on this server.' }, { status: 500 })
+    return NextResponse.json({ error: 'File must be under 2MB' }, { status: 400 })
   }
 
   let buffer: Buffer
@@ -65,12 +47,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to read uploaded file.' }, { status: 500 })
   }
 
+  const detectedType = detectImageType(buffer)
+  if (!detectedType) {
+    return NextResponse.json(
+      { error: 'Invalid file format. Only PNG, JPEG, and WebP are supported.' },
+      { status: 400 },
+    )
+  }
+
+  const ext = detectedType === 'image/png' ? 'png' : detectedType === 'image/webp' ? 'webp' : 'jpg'
+  const filename = `logos/${ctx.org.id}-${Date.now()}.${ext}`
+
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN
+  if (!blobToken) {
+    console.error('[logo upload] BLOB_READ_WRITE_TOKEN is not set')
+    return NextResponse.json({ error: 'Blob storage is not configured on this server.' }, { status: 500 })
+  }
+
   let blobUrl: string
   try {
-    console.log('[logo upload] calling put:', filename, file.type, buffer.length, 'bytes')
+    console.log('[logo upload] calling put:', filename, detectedType, buffer.length, 'bytes')
     const blob = await put(filename, buffer, {
       access: 'private',
-      contentType: file.type,
+      contentType: detectedType,
       token: blobToken,
     })
     blobUrl = blob.url

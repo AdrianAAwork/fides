@@ -24,6 +24,9 @@ export async function GET() {
     }
 
     const contentType = res.headers.get('content-type') ?? 'image/png'
+    if (contentType.startsWith('image/svg') || contentType.startsWith('text/')) {
+      return new Response('Unsupported image format', { status: 400 })
+    }
     const body = await res.arrayBuffer()
 
     return new Response(body, {

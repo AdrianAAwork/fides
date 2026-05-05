@@ -39,7 +39,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  console.log('[POST /api/assessments] body received:', JSON.stringify(body))
+  console.log('[POST /api/assessments]', {
+    org_id: ctx.org.id,
+    user_id: ctx.user.id,
+    has_vendor: !!body.vendorName,
+    has_companies_house: !!body.companiesHouseNumber,
+  })
 
   // TODO: SECURITY (MEDIUM) — vendorName is interpolated into Claude prompts; a crafted name
   // could attempt prompt injection. The 200-char cap below limits payload size but consider
