@@ -78,6 +78,6 @@ export const config = {
   // /api/onboarding/* can be moved to the protected matcher with an exemption only for the
   // unauthenticated invite-lookup pre-check if one exists.
   matcher: [
-    '/((?!api/auth|api/onboarding|_next/static|_next/image|logos|icon|favicon|apple-touch-icon|apple-icon|.*\\.(?:svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf|css|js)).*)',
+    '/((?!api/auth|api/onboarding|trust|_next/static|_next/image|logos|icon|favicon|apple-touch-icon|apple-icon|.*\\.(?:svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf|css|js)).*)',
   ],
 }

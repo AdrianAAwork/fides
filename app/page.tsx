@@ -2,7 +2,8 @@ import FidesSeal from '@/src/components/FidesSeal'
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F4F3F8] px-4">
+    <div className="min-h-screen flex flex-col bg-[#F4F3F8] px-4">
+      <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-[400px] space-y-6 text-center">
         <div className="flex flex-col items-center gap-3">
           <FidesSeal size={80} />
@@ -34,6 +35,12 @@ export default function LoginPage() {
           Powered by Anthropic · Companies House · GLEIF
         </p>
       </div>
+      </div>
+      <footer className="py-6 flex justify-center gap-6 text-[11px] text-[#B8B3CE]">
+        <a href="/trust" className="hover:text-[#5B3FD4] transition-colors">Trust & Security</a>
+        <a href="/legal" className="hover:text-[#5B3FD4] transition-colors">Legal</a>
+        <span>© 2026 Fides</span>
+      </footer>
     </div>
   )
 }
