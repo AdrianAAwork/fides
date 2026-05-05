@@ -31,11 +31,14 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
   const session = await getSession(req, res)
 
-  // Email verification gate — before onboarding so unverified users are caught immediately
+  // Email verification gate
   if (session?.user && !session.user.email_verified) {
-    if (pathname !== '/verify-email' && !pathname.startsWith('/api/auth/')) {
-      return NextResponse.redirect(new URL('/verify-email', req.url))
+    // Return immediately for allowed paths — never fall through to the onboarding
+    // check below, which would redirect /verify-email → /onboarding → loop.
+    if (pathname === '/verify-email' || pathname.startsWith('/api/auth/')) {
+      return res
     }
+    return NextResponse.redirect(new URL('/verify-email', req.url))
   }
   // Verified users have no reason to linger on /verify-email
   if (session?.user?.email_verified && pathname === '/verify-email') {
