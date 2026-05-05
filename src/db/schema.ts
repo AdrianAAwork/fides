@@ -313,7 +313,13 @@ export const globalRateLimits = pgTable('global_rate_limits', {
   count: smallint('count').notNull().default(0),
 })
 
-// 14. sanctions_entries
+// 14. verification_email_sends — per-user rate limit for /api/auth/resend-verification
+export const verificationEmailSends = pgTable('verification_email_sends', {
+  auth0Id: text('auth0_id').primaryKey(),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull(),
+})
+
+// 15. sanctions_entries
 export const sanctionsEntries = pgTable('sanctions_entries', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 500 }).notNull(),

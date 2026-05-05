@@ -13,6 +13,9 @@ export async function middleware(req: NextRequest) {
     const res = NextResponse.next()
     const session = await getSession(req, res)
     if (session?.user) {
+      if (!session.user.email_verified) {
+        return NextResponse.redirect(new URL('/verify-email', req.url))
+      }
       return NextResponse.redirect(new URL('/dashboard', req.url))
     }
     return res
@@ -27,6 +30,18 @@ export async function middleware(req: NextRequest) {
 
   const res = NextResponse.next()
   const session = await getSession(req, res)
+
+  // Email verification gate — before onboarding so unverified users are caught immediately
+  if (session?.user && !session.user.email_verified) {
+    if (pathname !== '/verify-email' && !pathname.startsWith('/api/auth/')) {
+      return NextResponse.redirect(new URL('/verify-email', req.url))
+    }
+  }
+  // Verified users have no reason to linger on /verify-email
+  if (session?.user?.email_verified && pathname === '/verify-email') {
+    return NextResponse.redirect(new URL('/dashboard', req.url))
+  }
+
   const needsOnboarding = session?.user?.[CLAIMS.NEEDS_ONBOARDING] === true
 
   if (needsOnboarding && pathname !== '/onboarding') {
