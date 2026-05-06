@@ -36,12 +36,18 @@ export default function TrustPage() {
             <h2 className="text-[18px] font-medium text-[#1A1625] mb-5">Infrastructure</h2>
             <p className="mb-4">Fides runs on the following providers:</p>
             <ul className="list-disc pl-6 space-y-2 mb-4">
-              <li><strong>Application hosting:</strong> Vercel (UK and EU edge regions)</li>
-              <li><strong>Database:</strong> Neon Postgres, EU region, encrypted at rest and in transit</li>
+              <li><strong>Application hosting:</strong> Vercel</li>
+              <li><strong>Database:</strong> Neon Postgres (EU region), encrypted at rest and in transit</li>
               <li><strong>Authentication:</strong> Auth0 (Okta, Inc.), EU tenant</li>
               <li><strong>AI analysis:</strong> Anthropic Claude API, with a hard monthly budget cap</li>
             </ul>
-            <p>All data is stored within the EU. Traffic is TLS 1.3 end-to-end. HSTS is preloaded with a two-year max-age.</p>
+            <p>
+              Account data and assessments are stored within the EU. Vendor analysis is performed by
+              our AI sub-processor (see{' '}
+              <Link href="/legal" className="text-[#5B3FD4] hover:underline">Legal</Link>
+              ). Traffic is TLS 1.2 or higher with modern cipher suites. HSTS is configured with the
+              preload directive and a two-year max-age.
+            </p>
           </section>
 
           <hr className="border-[#E2DFF0]" />
@@ -53,7 +59,7 @@ export default function TrustPage() {
               <li><strong>Email verification required</strong> before any AI-powered feature is enabled.</li>
               <li><strong>Role-based access control:</strong> three tiers (Viewer, Analyst, Admin). All sensitive mutations are gated by role and logged to an audit trail.</li>
               <li><strong>Multi-tenant isolation:</strong> every database query filters by organisation. Users in one organisation cannot enumerate, read, or modify data belonging to another.</li>
-              <li><strong>Breached password detection</strong> is enabled via Auth0&apos;s HaveIBeenPwned integration. Suspicious IP throttling and brute-force protection are active.</li>
+              <li><strong>Breached password detection (monitoring mode)</strong> is enabled via Auth0&apos;s HaveIBeenPwned integration. Suspicious IP throttling and brute-force protection are active.</li>
             </ul>
           </section>
 
