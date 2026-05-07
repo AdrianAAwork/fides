@@ -21,6 +21,12 @@ export default async function VerifyEmailPage() {
         </p>
 
         <div className="space-y-3">
+          <div className="bg-[#FFF8E1] border border-[#F0E0A0] rounded-[6px] px-3 py-3 mb-3 text-left">
+            <p className="text-[12px] text-[#8B5A00]">
+              Verification emails may initially appear in your spam folder — that&apos;s normal for
+              new senders. If you don&apos;t see it within a minute, check spam or click Resend below.
+            </p>
+          </div>
           <ResendButton />
 
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
