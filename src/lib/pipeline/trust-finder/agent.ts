@@ -216,6 +216,24 @@ function buildFinding(state: RunState, certsClaimed: CertClaimed[]): TrustFindin
 }
 
 export async function findTrust(vendor: string, domain: string): Promise<TrustFinding> {
+  // No domain → refuse to fabricate. A name-slug like "trust.vanta.com/mypos-limited"
+  // can return HTTP 200 from the platform's own homepage and produce a confident wrong
+  // finding. That is strictly worse than an honest NOT_FOUND.
+  if (!domain) {
+    console.log(`[trust-finder:agent] no domain for "${vendor}" — skipping all rungs, returning NOT_FOUND`)
+    return {
+      vendor, domain,
+      state: 'NOT_FOUND',
+      confidence: 'low',
+      sourceUrl: null,
+      sourceTier: null,
+      platform: null,
+      certsClaimed: [],
+      warning: 'No vendor domain was available, so no trust portal could be checked. Provide the vendor\'s website to enable trust-portal discovery.',
+      trace: { rungsAttempted: ['no-domain:skipped'], fetchBuckets: [], modelCalls: 0, elapsedMs: 0, blockedAtTrustShapedUrl: false },
+    }
+  }
+
   const state: RunState = {
     vendor,
     domain,
@@ -241,8 +259,12 @@ export async function findTrust(vendor: string, domain: string): Promise<TrustFi
       if (outcome === 'hit') break
     }
 
-    // Rung 2 — Known-platform slug URLs (no model call)
-    if (!state.foundUrl) {
+    // Rung 2 — Known-platform slug URLs (no model call).
+    // These URLs are derived from the vendor name, not the domain, so they must
+    // only run when we have a real domain to anchor the company identity. The empty-
+    // domain guard above already prevents reaching this point without a domain, but
+    // the explicit check here makes the invariant local and obvious.
+    if (!state.foundUrl && domain) {
       for (const { url, label } of getRung2Urls(domain, vendor)) {
         if (!hasCapacity(state)) break
         const outcome = await tryUrl(url, label, true, state)
