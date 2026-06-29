@@ -127,7 +127,7 @@ export default async function AssessmentDetailPage({
     .where(eq(doraClassification.assessmentId, id))
     .limit(1)
 
-  const manualCerts = await db
+  const allCerts = await db
     .select({
       id: certifications.id,
       certType: certifications.certType,
@@ -137,11 +137,12 @@ export default async function AssessmentDetailPage({
       expiryDate: certifications.expiryDate,
       sourceUrl: certifications.sourceUrl,
       notes: certifications.notes,
+      sourceType: certifications.sourceType,
+      verifiedBy: certifications.verifiedBy,
     })
     .from(certifications)
     .where(and(
       eq(certifications.assessmentId, id),
-      eq(certifications.sourceType, 'MANUAL'),
       isNull(certifications.deletedAt),
     ))
     .orderBy(certifications.createdAt)
@@ -190,13 +191,9 @@ export default async function AssessmentDetailPage({
   ])
   const trustScore = scores.find(s => s.dimension === 'TRUST_CERTS')
   const trustData = trustScore?.sourceData as Record<string, unknown> | null
-  const autoCertsFound = (trustData?.certs_found as Array<{ certType: string }>) ?? []
-  const allCertTypes = [
-    ...autoCertsFound.map(c => c.certType),
-    ...manualCerts.map(c => c.certType),
-  ]
+  const allCertTypes = allCerts.map(c => c.certType)
   const hasSoc2OrIso = allCertTypes.some(t => ['SOC2_TYPE_I', 'SOC2_TYPE_II', 'ISO_27001'].includes(t))
-  const noTrustPortalAndNoCerts = trustData?.status === 'not_found' && manualCerts.length === 0
+  const noTrustPortalAndNoCerts = trustData?.status === 'not_found' && allCerts.length === 0
   const financialScore = scores.find(s => s.dimension === 'FINANCIAL_HEALTH')
   const finData = financialScore?.sourceData as Record<string, unknown> | null
   const goingConcern = (finData?.going_concern as { going_concern?: boolean })?.going_concern ?? false
@@ -360,6 +357,12 @@ export default async function AssessmentDetailPage({
         </div>
 
         {/* ── Executive summary ──────────────────────────────────────────────── */}
+        {execSummary?.status === 'summary_unavailable' && (
+          <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-4 flex items-center gap-3">
+            <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8]">Executive summary</p>
+            <p className="text-[13px] text-[#B8B3CE]">Unavailable for this assessment.</p>
+          </div>
+        )}
         {execSummary && execSummary.status !== 'summary_unavailable' && execSummary.summary && (
           <div className="bg-white rounded-xl border border-[#E2DFF0] px-6 py-5 space-y-4">
             <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8]">Executive summary</p>
@@ -424,7 +427,7 @@ export default async function AssessmentDetailPage({
                   scoreId={score.id}
                   assessmentId={id}
                   canOverride={canOverride}
-                  certifications={dim === 'TRUST_CERTS' ? (manualCerts as CertRow[]) : undefined}
+                  certifications={dim === 'TRUST_CERTS' ? (allCerts as CertRow[]) : undefined}
                 />
               )
             })}

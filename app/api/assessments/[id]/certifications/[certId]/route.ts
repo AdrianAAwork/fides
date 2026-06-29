@@ -6,6 +6,82 @@ import { assessments, assessmentScores, certifications, auditLog } from '@/src/d
 import { and, eq, isNull } from 'drizzle-orm'
 import { recalculateOverall } from '@/src/lib/recalculate'
 
+const VALID_CERT_TYPES = new Set([
+  'SOC2_TYPE_I', 'SOC2_TYPE_II', 'ISO_27001', 'ISO_22301', 'ISO_27701',
+  'CYBER_ESSENTIALS', 'CYBER_ESSENTIALS_PLUS', 'PCI_DSS', 'CSA_STAR', 'OTHER',
+])
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string; certId: string }> }
+) {
+  const ctx = await getDbContext()
+  if (!ctx) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
+  if (!hasRole(ctx.user.role, 'ANALYST')) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
+  }
+
+  const { id: assessmentId, certId } = await params
+
+  const [cert] = await db
+    .select()
+    .from(certifications)
+    .where(and(
+      eq(certifications.id, certId),
+      eq(certifications.assessmentId, assessmentId),
+      eq(certifications.orgId, ctx.org.id),
+      isNull(certifications.deletedAt),
+    ))
+    .limit(1)
+
+  if (!cert) return NextResponse.json({ error: 'Certification not found' }, { status: 404 })
+  if (cert.sourceType === 'MANUAL') {
+    return NextResponse.json({ error: 'Use the add-certification flow for manually added certifications' }, { status: 400 })
+  }
+
+  let body: Record<string, unknown>
+  try { body = await req.json() } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const certType = typeof body.certType === 'string' ? body.certType : cert.certType
+  if (!VALID_CERT_TYPES.has(certType)) {
+    return NextResponse.json({ error: 'Invalid cert type' }, { status: 400 })
+  }
+
+  const issuingBody = typeof body.issuingBody === 'string' ? body.issuingBody.trim().slice(0, 255) || null : cert.issuingBody
+  const auditPeriodStart = typeof body.auditPeriodStart === 'string' && body.auditPeriodStart ? body.auditPeriodStart : null
+  const auditPeriodEnd = typeof body.auditPeriodEnd === 'string' && body.auditPeriodEnd ? body.auditPeriodEnd : null
+  const expiryDate = typeof body.expiryDate === 'string' && body.expiryDate ? body.expiryDate : null
+  const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) || null : cert.notes
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(certifications)
+      .set({
+        certType: certType as typeof certifications.certType._.data,
+        issuingBody,
+        auditPeriodStart,
+        auditPeriodEnd,
+        expiryDate,
+        notes,
+        verifiedBy: ctx.user.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(certifications.id, certId))
+
+    await tx.insert(auditLog).values({
+      assessmentId,
+      orgId: ctx.org.id,
+      userId: ctx.user.id,
+      actionType: 'CERT_ADDED',
+      newValue: { certType, certId, source: cert.sourceType, action: 'verified' } as Record<string, unknown>,
+    })
+  })
+
+  return NextResponse.json({ ok: true })
+}
+
 const CERT_POINTS: Record<string, number> = {
   SOC2_TYPE_II: 40,
   SOC2_TYPE_I: 25,

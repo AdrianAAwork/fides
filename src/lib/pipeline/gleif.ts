@@ -23,20 +23,32 @@ async function gleifFetch(path: string): Promise<unknown> {
 export async function fetchGleif(vendorName: string, companiesHouseNumber?: string): Promise<GleifData> {
   try {
     let lei: string | undefined
+    let matchMethod: GleifData['matchMethod']
 
-    // Step 1a — if we have a CH number, try a direct registry-number lookup first.
-    // This avoids name-matching ambiguity (e.g. benefit trusts vs the main entity).
+    // Step 1a — if we have a CH number, try a direct registry-number lookup.
+    // No jurisdiction filter: FC-prefixed foreign companies (Ireland, etc.) are not GB-jurisdiction
+    // entities in GLEIF even though they have a UK Companies House number. A jurisdiction=GB filter
+    // would silently fail for those, causing a fallback to fuzzy name-matching that can return an
+    // entirely different legal entity.
     if (companiesHouseNumber) {
-      const regPath = `/lei-records?filter%5Bentity.registeredAs%5D=${encodeURIComponent(companiesHouseNumber)}&filter%5Bentity.jurisdiction%5D=GB&page%5Bsize%5D=1`
+      const regPath = `/lei-records?filter%5Bentity.registeredAs%5D=${encodeURIComponent(companiesHouseNumber)}&page%5Bsize%5D=1`
       const regRes = await gleifFetch(regPath)
       const regData = regRes as { data?: Array<{ id?: string }> }
       lei = regData.data?.[0]?.id
       if (lei) {
+        matchMethod = 'registeredAs'
         console.log('[pipeline:gleif] matched by registeredAs', companiesHouseNumber, '→ LEI', lei)
+      } else {
+        // Precise identifier lookup returned nothing. Do NOT fall back to name search:
+        // a fuzzy match could silently return a different legal entity (e.g. a branch or
+        // subsidiary with a similar name). Return no GLEIF data and let the analyst know.
+        console.log('[pipeline:gleif] no GLEIF record for registeredAs', companiesHouseNumber, '— not falling back to name search to avoid wrong-entity match')
+        return {}
       }
     }
 
-    // Step 1b — fall back to autocomplete name search
+    // Step 1b — name search, only when no identifying number was provided.
+    // When a CH number was given but lookup failed, we already returned above.
     if (!lei) {
       const searchPath = `/autocompletions?field=fulltext&q=${encodeURIComponent(vendorName)}&page%5Bsize%5D=5`
       const searchRes = await gleifFetch(searchPath)
@@ -63,7 +75,8 @@ export async function fetchGleif(vendorName: string, companiesHouseNumber?: stri
       }
 
       lei = match.relationships!['lei-records']!.data!.id!
-      console.log('[pipeline:gleif] matched by name autocomplete → LEI', lei, 'entry:', match.attributes?.value)
+      matchMethod = 'nameSearch'
+      console.log('[pipeline:gleif] matched by name search → LEI', lei, 'entry:', match.attributes?.value, '— analyst should confirm this is the correct entity')
     }
 
     console.log('[pipeline:gleif] found LEI', lei, 'for:', vendorName)
@@ -104,7 +117,7 @@ export async function fetchGleif(vendorName: string, companiesHouseNumber?: stri
       }
     }
 
-    return { lei, legalName, jurisdiction, category, status, registeredAs, ultimateParent }
+    return { lei, legalName, jurisdiction, category, status, registeredAs, ultimateParent, matchMethod }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[pipeline:gleif] error:', msg)

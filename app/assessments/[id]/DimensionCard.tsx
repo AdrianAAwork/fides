@@ -15,6 +15,8 @@ export interface CertRow {
   expiryDate: string | null
   sourceUrl: string | null
   notes: string | null
+  sourceType: string         // 'MANUAL' | 'AUTO_VANTA' | 'AUTO_SAFEBASE' | 'AUTO_WEB'
+  verifiedBy: string | null  // null = auto-discovered, unverified
 }
 
 interface Props {
@@ -64,7 +66,7 @@ const SOURCE_LABELS: Record<string, string> = {
   BREACH_HISTORY: 'Have I Been Pwned (HIBP)',
   SANCTIONS: 'OFSI · OFAC · EU (Neon DB)',
   OWNERSHIP: 'GLEIF',
-  TRUST_CERTS: 'IASME · Vanta · SafeBase · vendor website',
+  TRUST_CERTS: 'Trust Finder (web scraping + Claude AI extraction)',
   NEWS_SENTIMENT: 'NewsAPI + Claude AI',
 }
 
@@ -392,6 +394,15 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
   const jurisdiction = sd.jurisdiction as string | undefined
   const status       = sd.status as string | undefined
   const parent       = sd.ultimateParent as { lei?: string; name?: string } | undefined
+  const matchMethod  = sd.matchMethod as string | undefined
+
+  if (matchMethod === 'nameSearch') {
+    steps.push({
+      text: `GLEIF entity matched via name search (no registry number match). Legal name on record: "${legalName ?? 'unknown'}". This may not be the same legal entity as the selected company.`,
+      type: 'warning',
+      action: 'Confirm that the matched entity above is the correct company before relying on jurisdiction and ownership data. If it is wrong, the ownership score may be inaccurate.',
+    })
+  }
 
   if (sd.error) {
     const cat = categorizeError(sd.error)
@@ -458,49 +469,55 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
 }
 
 function explainTrustCerts(sd: Record<string, unknown>, score: number): Step[] {
-  const certs  = (sd.certs_found as Array<{ certType: string; source: string; expiryDate?: string }>) ?? []
+  const certs  = (sd.certs_found as Array<{ certType: string; source: string; notes?: string }>) ?? []
   const status = sd.status as string | undefined
   const steps: Step[] = []
 
   if (sd.error) {
     steps.push({
-      text: 'An error occurred during portal checks. Results below may be incomplete.',
+      text: 'An error occurred during the trust check. Results below may be incomplete.',
       type: 'warning',
     })
   }
 
-  if (certs.length === 0) {
-    if (status === 'inconclusive') {
+  if (status === 'not_found') {
+    steps.push({
+      text: 'No trust page found at common locations. Base score: 15.',
+      type: 'info',
+      action: 'The vendor may host certifications on a custom subdomain or request-only portal. Verify manually or request documentation directly.',
+    })
+  } else if (status === 'inconclusive') {
+    steps.push({
+      text: 'A trust page was found but its certifications could not be read (likely dynamically rendered or access-gated). Score: 30.',
+      type: 'warning',
+      action: 'Visit the trust page directly or request SOC 2, ISO 27001, or Cyber Essentials documentation from the vendor.',
+    })
+  } else {
+    // found — additive per cert
+    const CERT_POINTS: Record<string, number> = {
+      SOC2_TYPE_II: 40, SOC2_TYPE_I: 25, ISO_27001: 30, PCI_DSS: 25,
+      CSA_STAR: 20, CYBER_ESSENTIALS_PLUS: 20, ISO_22301: 15, ISO_27701: 15,
+      CYBER_ESSENTIALS: 15, OTHER: 15,
+    }
+    if (certs.length === 0) {
       steps.push({
-        text: 'No certifications were detected after checking all automated sources, but some sources were unreachable. Base score: 25.',
-        type: 'warning',
-        action: 'Request copies of SOC 2, ISO 27001, or Cyber Essentials certificates directly from the vendor.',
+        text: 'Trust page found but no security certifications were listed. Score: 20.',
+        type: 'info',
       })
     } else {
       steps.push({
-        text: 'No certifications were found across any of the automated sources checked. Base score: 15.',
-        type: 'info',
-        action: 'This may mean the vendor does not publish certifications publicly. Request SOC 2, ISO 27001, or Cyber Essentials documentation directly from the vendor.',
+        text: `${certs.length} security certification${certs.length !== 1 ? 's' : ''} found. Score accumulates per certification.`,
+        type: 'base',
       })
+      for (const cert of certs) {
+        const pts = CERT_POINTS[cert.certType] ?? 15
+        const label = cert.certType === 'OTHER' && cert.notes
+          ? `${cert.notes} (mapped to Other)`
+          : (CERT_LABELS[cert.certType] ?? cert.certType)
+        steps.push({ text: `${label}: +${pts}`, type: 'positive' })
+      }
+      steps.push({ text: `Final score: ${score} (capped at 100).`, type: 'base' })
     }
-  } else {
-    steps.push({
-      text: `${certs.length} certification${certs.length !== 1 ? 's' : ''} found. Score accumulates per certification.`,
-      type: 'base',
-    })
-    const CERT_POINTS: Record<string, number> = {
-      SOC2_TYPE_II: 40, ISO_27001: 30, CYBER_ESSENTIALS_PLUS: 20,
-      CYBER_ESSENTIALS: 15, ISO_22301: 10,
-    }
-    for (const cert of certs) {
-      const pts = CERT_POINTS[cert.certType] ?? 15
-      const label = CERT_LABELS[cert.certType] ?? cert.certType
-      steps.push({
-        text: `${label} via ${cert.source}${cert.expiryDate ? ` (expires ${cert.expiryDate})` : ''}: +${pts}`,
-        type: 'positive',
-      })
-    }
-    steps.push({ text: `Final score: ${score} (capped at 100).`, type: 'base' })
   }
 
   return steps
@@ -648,6 +665,10 @@ export default function DimensionCard({
   const [certError, setCertError] = useState<string | null>(null)
   const [certDeleteId, setCertDeleteId] = useState<string | null>(null)
   const [certDeleting, setCertDeleting] = useState(false)
+  const [verifyCertId, setVerifyCertId] = useState<string | null>(null)
+  const [verifyCertForm, setVerifyCertForm] = useState<CertForm>(EMPTY_CERT_FORM)
+  const [verifySaving, setVerifySaving] = useState(false)
+  const [verifyError, setVerifyError] = useState<string | null>(null)
 
   async function handleOverrideSave() {
     const ns = Number(newScoreVal)
@@ -733,12 +754,47 @@ export default function DimensionCard({
     }
   }
 
+  async function handleVerifyCert(certId: string) {
+    setVerifyError(null)
+    setVerifySaving(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/certifications/${certId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          certType: verifyCertForm.certType,
+          issuingBody: verifyCertForm.issuingBody || null,
+          auditPeriodStart: verifyCertForm.auditPeriodStart || null,
+          auditPeriodEnd: verifyCertForm.auditPeriodEnd || null,
+          expiryDate: verifyCertForm.expiryDate || null,
+          notes: verifyCertForm.notes || null,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setVerifyError((data as { error?: string }).error ?? 'Failed to save.')
+        return
+      }
+      setVerifyCertId(null)
+      setVerifyCertForm(EMPTY_CERT_FORM)
+      router.refresh()
+    } catch {
+      setVerifyError('Network error. Please try again.')
+    } finally {
+      setVerifySaving(false)
+    }
+  }
+
   const sd      = sourceData ?? {}
   const source  = SOURCE_LABELS[dimension] ?? 'Unknown'
   const fetched = fetchedAt ? new Date(fetchedAt).toLocaleString('en-GB') : null
 
   // Lazy-compute steps only when expanded
   const steps = open ? getSteps(dimension, sourceData, finalScore) : []
+
+  // Split certifications by source type for separate display sections
+  const autoCerts = certifications.filter(c => c.sourceType !== 'MANUAL')
+  const manualCerts = certifications.filter(c => c.sourceType === 'MANUAL')
 
   // Sanctions and Trust-certs have extra detail sections
   const sanctionsMatches = dimension === 'SANCTIONS'
@@ -747,7 +803,17 @@ export default function DimensionCard({
   const sanctionsScreened = dimension === 'SANCTIONS'
     ? ((sd.screened as string[]) ?? [])
     : []
-  const scrapeMeta = dimension === 'TRUST_CERTS'
+  // New agent result (trust-finder integration)
+  const agentResult = dimension === 'TRUST_CERTS'
+    ? (sd.scrape_metadata as Record<string, unknown> | undefined)?.agent as {
+        state: string; confidence: string; sourceUrl: string | null; sourceTier: string | null
+        platform: string | null; warning: string
+        privacy_frameworks?: Array<{ certType: string; rawLabel: string }>
+      } | undefined
+    : undefined
+
+  // Legacy portal table (old assessments that pre-date trust-finder)
+  const scrapeMeta = dimension === 'TRUST_CERTS' && !agentResult
     ? (sd.scrape_metadata as Record<string, { attempted: boolean; http_status?: number; found: boolean; keywords_found?: string[]; error?: string | null }> | undefined)
     : undefined
 
@@ -890,7 +956,65 @@ export default function DimensionCard({
             </ul>
           </div>
 
-          {/* TRUST_CERTS: portal breakdown table */}
+          {/* TRUST_CERTS: agent result (new trust-finder assessments) */}
+          {agentResult && (
+            <div>
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
+                Trust finder result
+              </p>
+              <div className="rounded-xl border border-[#E2DFF0] overflow-hidden bg-white divide-y divide-[#E2DFF0]">
+                <div className="px-3 py-2.5 flex items-center justify-between text-xs">
+                  <span className="text-[#5B5478] font-medium">State</span>
+                  <span className={`font-medium ${
+                    agentResult.state === 'FOUND_AND_READ' ? 'text-[#3B6D11]' :
+                    agentResult.state === 'NOT_FOUND' ? 'text-[#8B85A8]' : 'text-[#BA7517]'
+                  }`}>
+                    {agentResult.state === 'FOUND_AND_READ' ? 'Found & read' :
+                     agentResult.state === 'FOUND_BUT_UNREADABLE' ? 'Found — unreadable (JS rendered)' :
+                     agentResult.state === 'FOUND_BUT_BLOCKED' ? 'Found — access gated' :
+                     'Not found'}
+                    {agentResult.sourceTier ? ` · ${agentResult.sourceTier}` : ''}
+                  </span>
+                </div>
+                {agentResult.platform && (
+                  <div className="px-3 py-2.5 flex items-center justify-between text-xs">
+                    <span className="text-[#5B5478] font-medium">Platform</span>
+                    <span className="text-[#5B5478] capitalize">{agentResult.platform}</span>
+                  </div>
+                )}
+                {agentResult.sourceUrl && (
+                  <div className="px-3 py-2.5 flex items-center justify-between text-xs gap-4">
+                    <span className="text-[#5B5478] font-medium flex-shrink-0">Source</span>
+                    <a
+                      href={agentResult.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#5B3FD4] hover:text-[#3C3489] truncate text-right"
+                    >
+                      {agentResult.sourceUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+              <p className="text-[12px] text-[#5B5478] mt-2 leading-relaxed">{agentResult.warning}</p>
+              {agentResult.privacy_frameworks && agentResult.privacy_frameworks.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-1.5">
+                    Privacy frameworks (self-certified)
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {agentResult.privacy_frameworks.map((pf, i) => (
+                      <span key={i} className="text-[12px] bg-[#F9F8FD] text-[#5B5478] border border-[#E2DFF0] px-2 py-0.5 rounded-full">
+                        {pf.rawLabel}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TRUST_CERTS: legacy portal table (pre-trust-finder assessments) */}
           {scrapeMeta && (
             <div>
               <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
@@ -973,6 +1097,195 @@ export default function DimensionCard({
             <p className="text-[12px] text-[#8B85A8] leading-relaxed border border-[#E2DFF0] rounded-xl px-3 py-2.5 bg-[#F9F8FD]">
               Automated checks cover known public directories only. Vendors may hold valid certifications on private portals, custom subdomains (e.g. trust.vendor.com), or available on request. Manual verification is recommended for Important and Critical vendors.
             </p>
+          )}
+
+          {/* TRUST_CERTS: auto-discovered certs from trust-finder */}
+          {dimension === 'TRUST_CERTS' && autoCerts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
+                Auto-discovered certifications
+              </p>
+              <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
+                {autoCerts.map(cert => {
+                  const isVerified = cert.verifiedBy != null
+                  const platformLabel = cert.sourceType === 'AUTO_VANTA' ? 'Vanta'
+                    : cert.sourceType === 'AUTO_SAFEBASE' ? 'SafeBase'
+                    : 'Web'
+                  const displayName = cert.certType === 'OTHER' && cert.notes
+                    ? cert.notes
+                    : (CERT_LABELS[cert.certType] ?? cert.certType)
+
+                  return (
+                    <div key={cert.id} className="bg-white">
+                      {/* Cert summary row */}
+                      <div className="px-3 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center flex-wrap gap-2">
+                              <span className="text-[13px] font-medium text-[#1A1625]">{displayName}</span>
+                              <span className="text-[11px] bg-[#FEF9EE] text-[#BA7517] border border-[#FAEEDA] px-2 py-0.5 rounded-full">
+                                Auto-discovered · {platformLabel}
+                              </span>
+                              {isVerified && (
+                                <span className="text-[11px] bg-[#EAF3DE] text-[#27500A] border border-[#EAF3DE] px-2 py-0.5 rounded-full">
+                                  Verified
+                                </span>
+                              )}
+                            </div>
+                            {cert.issuingBody && (
+                              <p className="text-[12px] text-[#8B85A8]">{cert.issuingBody}</p>
+                            )}
+                            <div className="flex flex-wrap gap-3 text-[12px]">
+                              {cert.auditPeriodStart || cert.auditPeriodEnd ? (
+                                <span className="text-[#5B5478]">
+                                  Audit: {cert.auditPeriodStart ? new Date(cert.auditPeriodStart).toLocaleDateString('en-GB') : '—'}
+                                  {' – '}
+                                  {cert.auditPeriodEnd ? new Date(cert.auditPeriodEnd).toLocaleDateString('en-GB') : '—'}
+                                </span>
+                              ) : (
+                                <span className="text-[#B8B3CE]">Audit period: not verified</span>
+                              )}
+                              {cert.expiryDate ? (
+                                <span className="text-[#5B5478]">
+                                  Expires {new Date(cert.expiryDate).toLocaleDateString('en-GB')}
+                                </span>
+                              ) : (
+                                <span className="text-[#B8B3CE]">Expiry: not verified</span>
+                              )}
+                            </div>
+                            {cert.sourceUrl && (
+                              <a
+                                href={cert.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[12px] text-[#5B3FD4] hover:text-[#3C3489] block truncate"
+                              >
+                                {cert.sourceUrl}
+                              </a>
+                            )}
+                          </div>
+                          {canOverride && verifyCertId !== cert.id && (
+                            <button
+                              onClick={() => {
+                                setVerifyCertId(cert.id)
+                                setVerifyCertForm({
+                                  certType: cert.certType,
+                                  issuingBody: cert.issuingBody ?? '',
+                                  auditPeriodStart: '',
+                                  auditPeriodEnd: '',
+                                  expiryDate: '',
+                                  sourceUrl: cert.sourceUrl ?? '',
+                                  notes: cert.certType === 'OTHER' ? '' : (cert.notes ?? ''),
+                                })
+                                setVerifyError(null)
+                              }}
+                              className="flex-shrink-0 text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                            >
+                              Verify
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Inline verify form */}
+                      {verifyCertId === cert.id && canOverride && (
+                        <div className="border-t border-[#E2DFF0] bg-[#F9F8FD] px-4 py-4 space-y-3">
+                          <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
+                            Verify — fill in dates from the actual cert report
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Cert type</label>
+                              <select
+                                value={verifyCertForm.certType}
+                                onChange={e => setVerifyCertForm(p => ({ ...p, certType: e.target.value }))}
+                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                              >
+                                {CERT_TYPE_OPTIONS.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                Issuing body <span className="normal-case text-[#B8B3CE]">(optional)</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. AICPA, BSI, IASME"
+                                value={verifyCertForm.issuingBody}
+                                onChange={e => setVerifyCertForm(p => ({ ...p, issuingBody: e.target.value }))}
+                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                Expiry date <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                              </label>
+                              <input
+                                type="date"
+                                value={verifyCertForm.expiryDate}
+                                onChange={e => setVerifyCertForm(p => ({ ...p, expiryDate: e.target.value }))}
+                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                Audit period start <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                              </label>
+                              <input
+                                type="date"
+                                value={verifyCertForm.auditPeriodStart}
+                                onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodStart: e.target.value }))}
+                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                Audit period end <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                              </label>
+                              <input
+                                type="date"
+                                value={verifyCertForm.auditPeriodEnd}
+                                onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodEnd: e.target.value }))}
+                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                Notes <span className="normal-case text-[#B8B3CE]">(optional)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={verifyCertForm.notes}
+                                onChange={e => setVerifyCertForm(p => ({ ...p, notes: e.target.value.slice(0, 500) }))}
+                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                              />
+                            </div>
+                          </div>
+                          {verifyError && <p className="text-[12px] text-[#791F1F]">{verifyError}</p>}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleVerifyCert(cert.id)}
+                              disabled={verifySaving}
+                              className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                            >
+                              {verifySaving ? 'Saving…' : 'Save as verified'}
+                            </button>
+                            <button
+                              onClick={() => { setVerifyCertId(null); setVerifyCertForm(EMPTY_CERT_FORM); setVerifyError(null) }}
+                              className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           )}
 
           {/* Manual certifications (TRUST_CERTS only) */}
@@ -1087,9 +1400,9 @@ export default function DimensionCard({
               )}
 
               {/* Cert rows */}
-              {certifications.length > 0 ? (
+              {manualCerts.length > 0 ? (
                 <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
-                  {certifications.map(cert => {
+                  {manualCerts.map(cert => {
                     const isExpiringSoon = cert.expiryDate
                       ? (new Date(cert.expiryDate).getTime() - Date.now()) < 90 * 24 * 60 * 60 * 1000
                       : false

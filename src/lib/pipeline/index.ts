@@ -11,7 +11,8 @@ import { fetchCompaniesHouseProfile } from './companies-house'
 import { fetchGleif } from './gleif'
 import { screenSanctions } from './sanctions'
 import { fetchNews, fetchHibp } from './news'
-import { fetchTrustPortals } from './trust-portals'
+import { findTrustPortal, adaptFindingToTrustPortals } from './trust-finder'
+import type { TrustFinding } from './trust-finder/types'
 import { callGoingConcern, callNewsSentiment, callExecSummary } from './claude'
 import { calculateScores, shouldTriggerQuestionnaire } from './scoring'
 import { eq, and } from 'drizzle-orm'
@@ -22,6 +23,7 @@ export interface PipelineInput {
   orgId: string
   userId: string
   previousAssessmentId?: string
+  vendorDomain?: string  // caller-supplied domain; takes priority over ch.website
 }
 
 export type PipelineEvent =
@@ -56,16 +58,46 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
   yield { type: 'step', step: 'trust_portals', status: 'running' }
 
   const officerNames = ch.officers.filter((o) => !o.resigned_on).map((o) => o.name)
-  const website = ch.website
+
+  // Domain priority: user-supplied > Companies House website > empty
+  const websiteRaw = input.vendorDomain || ch.website
+  let domain = ''
+  try {
+    if (websiteRaw) {
+      domain = new URL(websiteRaw.startsWith('http') ? websiteRaw : `https://${websiteRaw}`).hostname
+    }
+  } catch {
+    domain = ''
+  }
+
+  console.log(`[pipeline:trust-finder] vendor="${ch.company_name || vendorName}" domain="${domain}" source=${input.vendorDomain ? 'user-input' : ch.website ? 'companies-house' : 'none'}`)
+
+  const NOT_FOUND_FINDING: TrustFinding = {
+    vendor: ch.company_name || vendorName,
+    domain,
+    state: 'NOT_FOUND',
+    confidence: 'low',
+    sourceUrl: null,
+    sourceTier: null,
+    platform: null,
+    certsClaimed: [],
+    warning: 'Trust finder could not be reached — verify certifications manually.',
+    trace: { rungsAttempted: [], fetchBuckets: [], modelCalls: 0, elapsedMs: 0, blockedAtTrustShapedUrl: false },
+  }
 
   // Phase A — parallel
-  const [gleif, sanctions, news, trustPortals, hibp] = await Promise.all([
+  const [gleif, sanctions, news, trustFinding, hibp] = await Promise.all([
     fetchGleif(vendorName, ch.company_number || undefined),
     screenSanctions(vendorName, officerNames),
     fetchNews(vendorName),
-    fetchTrustPortals(ch.company_name || vendorName, website),
-    fetchHibp(website ? new URL(website.startsWith('http') ? website : `https://${website}`).hostname : ''),
+    findTrustPortal(ch.company_name || vendorName, domain).catch((err) => {
+      console.error('[pipeline] trust-finder failed, degrading to NOT_FOUND:', err)
+      return NOT_FOUND_FINDING
+    }),
+    fetchHibp(domain),
   ])
+
+  const trustPortals = adaptFindingToTrustPortals(trustFinding)
 
   yield { type: 'step', step: 'gleif', status: gleif.error ? 'warn' : 'done', message: gleif.error }
   yield { type: 'step', step: 'sanctions', status: sanctions.error ? 'warn' : 'done', message: sanctions.error }
@@ -93,7 +125,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
 
   // Phase D — exec summary
   yield { type: 'step', step: 'summary', status: 'running' }
-  const execSummary = await callExecSummary(scores, vendorName)
+  const execSummary = await callExecSummary(scores, vendorName, { trustPortals, gleif, hibp })
   yield { type: 'step', step: 'summary', status: execSummary.status === 'summary_unavailable' ? 'warn' : 'done' }
 
   // Phase E — DB writes in a single transaction
@@ -145,22 +177,21 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
         })
       }
 
-      // Insert certifications found
+      // Insert certifications found (expiryDate always null — not verified by agent)
       for (const cert of trustPortals.certs_found) {
         await tx.insert(certifications).values({
           assessmentId: aId,
           orgId,
           certType: cert.certType as 'SOC2_TYPE_I' | 'SOC2_TYPE_II' | 'ISO_27001' | 'ISO_22301' | 'ISO_27701' | 'CYBER_ESSENTIALS' | 'CYBER_ESSENTIALS_PLUS' | 'PCI_DSS' | 'CSA_STAR' | 'OTHER',
-          sourceType: cert.source === 'ncsc'
-            ? 'AUTO_WEB'
-            : cert.source === 'vanta'
+          sourceType: cert.source === 'vanta'
             ? 'AUTO_VANTA'
             : cert.source === 'safebase'
             ? 'AUTO_SAFEBASE'
             : 'AUTO_WEB',
-          sourceUrl: null,
+          sourceUrl: cert.sourceUrl ?? null,
           issuingBody: cert.issuingBody ?? null,
-          expiryDate: cert.expiryDate ?? null,
+          expiryDate: null,
+          notes: cert.notes ?? null,
           retrievedAt: new Date(),
         })
       }

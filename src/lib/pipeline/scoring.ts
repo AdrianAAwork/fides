@@ -137,6 +137,7 @@ function scoreOwnership(gleif: GleifData): DimensionScore {
       category: gleif.category,
       status: gleif.status,
       ultimateParent: gleif.ultimateParent,
+      matchMethod: gleif.matchMethod,
       error: gleif.error,
     },
     fetchedAt: new Date(),
@@ -144,36 +145,39 @@ function scoreOwnership(gleif: GleifData): DimensionScore {
 }
 
 function scoreTrustCerts(trustPortals: TrustPortalsData): DimensionScore {
-  const certs = trustPortals.certs_found
-  let score = 0
+  let score: number
 
-  if (certs.length === 0) {
-    score = trustPortals.status === 'inconclusive' ? 25 : 15
+  if (trustPortals.status === 'not_found') {
+    score = 15
+  } else if (trustPortals.status === 'inconclusive') {
+    // Found-but-defended/unreadable trust portal is a mild positive signal
+    score = 30
   } else {
-    for (const cert of certs) {
-      const type = cert.certType
-
-      if (type === 'SOC2_TYPE_II') {
-        score += 40
-      } else if (type === 'ISO_27001') {
-        score += 30
-      } else if (type === 'CYBER_ESSENTIALS_PLUS') {
-        score += 20
-      } else if (type === 'CYBER_ESSENTIALS') {
-        score += 15
-      } else if (type === 'ISO_22301') {
-        score += 10
-      } else {
-        score += 15 // unconfirmed cert
+    // found — additive per security cert, capped at 100
+    score = 0
+    for (const cert of trustPortals.certs_found) {
+      switch (cert.certType) {
+        case 'SOC2_TYPE_II':         score += 40; break
+        case 'SOC2_TYPE_I':          score += 25; break
+        case 'ISO_27001':            score += 30; break
+        case 'PCI_DSS':              score += 25; break
+        case 'CSA_STAR':             score += 20; break
+        case 'CYBER_ESSENTIALS_PLUS': score += 20; break
+        case 'ISO_22301':            score += 15; break
+        case 'ISO_27701':            score += 15; break
+        case 'CYBER_ESSENTIALS':     score += 15; break
+        default:                     score += 15; break  // OTHER and any future enum value
       }
     }
+    // Floor: found portal but all certs were privacy_frameworks (zero security certs)
+    if (score === 0) score = 20
+    score = Math.min(100, score)
   }
 
-  const finalScore = Math.min(100, score)
   return {
     dimension: 'TRUST_CERTS',
-    rawScore: finalScore,
-    finalScore,
+    rawScore: score,
+    finalScore: score,
     sourceData: {
       certs_found: trustPortals.certs_found,
       status: trustPortals.status,

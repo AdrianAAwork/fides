@@ -71,6 +71,7 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
     overallScore: number
   } | null>(null)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
+  const [vendorDomain, setVendorDomain] = useState('')
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchAbortRef = useRef<AbortController | null>(null)
   const skipSearchRef = useRef(false)
@@ -114,6 +115,7 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
     setSelected(result)
     setQuery(result.company_name)
     setShowDropdown(false)
+    setVendorDomain('')
   }
 
   async function startPipeline(vendorName: string, companiesHouseNumber?: string) {
@@ -121,11 +123,22 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
     setPipelineSteps(new Map())
     setPipelineError(null)
 
+    // Strip protocol if the user pasted a full URL — we want just the hostname
+    const rawDomain = vendorDomain.trim()
+    let cleanDomain: string | undefined
+    if (rawDomain) {
+      try {
+        cleanDomain = new URL(rawDomain.startsWith('http') ? rawDomain : `https://${rawDomain}`).hostname
+      } catch {
+        cleanDomain = rawDomain
+      }
+    }
+
     try {
       const res = await fetch('/api/assessments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vendorName, companiesHouseNumber }),
+        body: JSON.stringify({ vendorName, companiesHouseNumber, vendorDomain: cleanDomain }),
       })
 
       if (!res.ok) {
@@ -254,6 +267,22 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
                   </p>
                 </div>
 
+                <div>
+                  <label className="block text-[13px] font-medium text-[#5B5478] mb-1">
+                    Vendor website <span className="text-[#B8B3CE] font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={vendorDomain}
+                    onChange={(e) => setVendorDomain(e.target.value)}
+                    placeholder="e.g. mypos.com"
+                    className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] focus:outline-none focus:ring-2 focus:ring-[#5B3FD4] focus:border-transparent"
+                  />
+                  <p className="text-[12px] text-[#B8B3CE] mt-1">
+                    Used to find the vendor&apos;s trust portal. Leave blank if unknown.
+                  </p>
+                </div>
+
                 {/* Data sources that will be checked */}
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3">
@@ -304,6 +333,22 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
               />
               <p className="text-[12px] text-[#B8B3CE] mt-1">
                 Assessment will run without a Companies House number.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-medium text-[#5B5478] mb-1">
+                Vendor website <span className="text-[#B8B3CE] font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={vendorDomain}
+                onChange={(e) => setVendorDomain(e.target.value)}
+                placeholder="e.g. mypos.com"
+                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] focus:outline-none focus:ring-2 focus:ring-[#5B3FD4] focus:border-transparent"
+              />
+              <p className="text-[12px] text-[#B8B3CE] mt-1">
+                Used to find the vendor&apos;s trust portal. Leave blank if unknown.
               </p>
             </div>
 

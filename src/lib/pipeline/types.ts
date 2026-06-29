@@ -56,6 +56,7 @@ export interface GleifData {
     lei?: string
     name?: string
   }
+  matchMethod?: 'registeredAs' | 'nameSearch'  // how the LEI was found — nameSearch can return wrong entity
   error?: string
 }
 
@@ -116,8 +117,10 @@ export interface ScrapeMeta {
 export interface TrustCertFound {
   certType: string
   source: string
-  expiryDate?: string
+  expiryDate?: string  // never populated by the automated pipeline — only by manual analyst entry
   issuingBody?: string
+  sourceUrl?: string
+  notes?: string       // rawLabel for certs that mapped to OTHER
 }
 
 export interface TrustPortalsData {
@@ -128,6 +131,7 @@ export interface TrustPortalsData {
     vanta?: ScrapeMeta
     safebase?: ScrapeMeta
     vendor_site?: ScrapeMeta
+    agent?: Record<string, unknown>  // trust-finder agent result blob
   }
   error?: string
 }
