@@ -98,21 +98,22 @@ export async function callHomepageAnalysis(homeHtml: string, domain: string): Pr
 }
 
 export async function callCertExtraction(pageText: string): Promise<CertClaimed[]> {
-  const system = `You are a security compliance analyst. Extract ONLY certifications and compliance frameworks that the vendor HOLDS — not ones they merely reference or benchmark against.
+  const system = `You are a security compliance analyst. Extract ONLY certifications and compliance frameworks that the vendor HOLDS or DISPLAYS in their compliance section — not ones they merely mention in passing in body text.
 
 HELD — extract these:
 - Entries in a dedicated Compliance or Certifications section (badges, named items, rows with an auditor)
 - On SafeBase pages: each item with its own ?itemUid= URL is a held certification — section membership is the primary signal
 - Explicit vendor claims: "we are X certified", "X compliant", "we have achieved X", "audited against X"
+- IMPORTANT: capture EVERY badge, logo, or named item shown in the vendor's compliance/certifications/trust section — this includes security certifications (SOC 2, ISO 27001, PCI DSS/3DS/PIN, etc.), regulatory frameworks (GDPR, DORA, CCPA), AND standards/frameworks the vendor states alignment with (NIST CSF, etc.). If an item appears as a listed badge or named entry in the compliance section, include it. When uncertain whether a listed item is a formal certification or a framework/standard alignment, INCLUDE it and categorise it — do NOT omit it on ambiguity alone.
 
 REFERENCED — do NOT extract:
-- Standards cited as benchmarks in prose: "aligned with", "based on", "in line with", "following"
+- Standards cited in passing in prose: "aligned with", "based on", "in line with", "following" — when the reference appears in body text paragraphs, NOT as a listed badge or dedicated section entry
 - Standards named inline within a control description, e.g. "ISO 27001 A.9.4.3" inside a password-policy paragraph, or "NIST SP 800-63B" inside an authentication section — these are control clause citations, not held certifications
-- Anything the vendor uses as a guideline but does not claim to hold a certificate or attestation for
+- Anything that only appears as a prose mention and is not shown as a distinct badge, entry, or item in the compliance section
 
 RULES:
 - Be EXHAUSTIVE — extract every distinct held certification; do not sample or truncate
-- foundInText: quote the shortest exact substring from the page that proves this cert is HELD (a badge label, section entry name, or "certified/compliant" statement). This must be a verbatim quote. If you cannot find a real supporting substring, omit the cert entirely.
+- foundInText: quote the shortest exact substring from the page that proves this cert is HELD or DISPLAYED in the compliance section (a badge label, section entry name, or "certified/compliant" statement). This must be a verbatim quote. If you cannot find a real supporting substring, omit the cert entirely.
 - auditor: the named third-party auditor if the page provides one (e.g. "Dot.Bit d.o.o."), else null
 - rawLabel: the label exactly as it appears on the page
 - Do NOT include dates, audit periods, expiry dates, scores, risk ratings, or impact levels
@@ -125,9 +126,9 @@ Privacy compliance frameworks (self-certification, NOT third-party audits): EU_U
 For PCI DSS: use PCI_DSS regardless of level; preserve the full level detail in rawLabel (e.g. "PCI DSS Service Provider Level 1").
 
 Add a "category" field to each cert:
-- "security_cert" for security/audit certifications (SOC, ISO, PCI, Cyber Essentials, CSA STAR, NIST CSF, GDPR, DORA, FedRAMP, HIPAA, C5, TISAX, EMVCo, OTHER)
-- "privacy_framework" for privacy compliance/self-certification frameworks (EU_US_DPF, UK_DPF, SWISS_US_DPF, CBPR, PRP)
-- "other" only if category is genuinely unclear
+- "security_cert" for security certifications and attestations: SOC, ISO, PCI_DSS, PCI_3DS, PCI_PIN, Cyber Essentials, CSA STAR, FedRAMP, HIPAA, C5, TISAX, EMVCo, and unrecognised items (OTHER)
+- "privacy_framework" for regulations and privacy/compliance frameworks the vendor claims alignment with: GDPR, DORA, CCPA, EU_US_DPF, UK_DPF, SWISS_US_DPF, CBPR, PRP
+- "other" for governance frameworks typically aligned with rather than certified against: NIST_CSF, and anything that doesn't clearly fit either group
 
 Reply with JSON only, no other text. Use JSON null (not the string "null") for auditor when no auditor is named on the page:
 {"certs": [{"certType": "...", "rawLabel": "...", "foundInText": "...", "auditor": "Auditor Name or null", "category": "security_cert"}]}`

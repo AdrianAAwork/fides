@@ -311,9 +311,33 @@ export async function findTrust(vendor: string, domain: string): Promise<TrustFi
       state.foundPlatform = null
     }
 
-    return buildFinding(state, certsClaimed)
+    const finding = buildFinding(state, certsClaimed)
+    logExtraction(finding)
+    return finding
   } catch (err) {
     console.error('[trust-finder:agent] unexpected error for', vendor, ':', err)
-    return buildFinding(state, [])
+    const finding = buildFinding(state, [])
+    logExtraction(finding)
+    return finding
   }
+}
+
+function logExtraction(finding: TrustFinding): void {
+  console.log(
+    `[trust-finder:extraction] state=${finding.state}` +
+    ` source=${finding.sourceUrl ?? 'none'}` +
+    ` platform=${finding.platform ?? 'none'}` +
+    ` tier=${finding.sourceTier ?? 'none'}`
+  )
+  for (const cert of finding.certsClaimed) {
+    console.log(`[trust-finder:extraction] cert: "${cert.rawLabel}" type=${cert.certType} category=${cert.category}`)
+  }
+  const counts = { security_cert: 0, privacy_framework: 0, other: 0 }
+  for (const cert of finding.certsClaimed) {
+    counts[cert.category] = (counts[cert.category] ?? 0) + 1
+  }
+  console.log(
+    `[trust-finder:extraction] total=${finding.certsClaimed.length}` +
+    ` (security_cert=${counts.security_cert}, privacy_framework=${counts.privacy_framework}, other=${counts.other})`
+  )
 }

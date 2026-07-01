@@ -177,8 +177,13 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
         })
       }
 
-      // Insert certifications found (expiryDate always null — not verified by agent)
-      for (const cert of trustPortals.certs_found) {
+      // Insert certifications found (expiryDate always null — not verified by agent).
+      // Includes both security certs (certs_found) and regulatory/other frameworks (frameworks_found).
+      const allAutoFound = [
+        ...trustPortals.certs_found,
+        ...(trustPortals.frameworks_found ?? []),
+      ]
+      for (const cert of allAutoFound) {
         await tx.insert(certifications).values({
           assessmentId: aId,
           orgId,

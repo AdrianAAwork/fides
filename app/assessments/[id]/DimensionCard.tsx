@@ -792,9 +792,22 @@ export default function DimensionCard({
   // Lazy-compute steps only when expanded
   const steps = open ? getSteps(dimension, sourceData, finalScore) : []
 
-  // Split certifications by source type for separate display sections
+  // Infer display category from certType + notes (no DB column — frameworks stored as OTHER + notes)
+  function getCertCategory(cert: CertRow): 'security_cert' | 'privacy_framework' | 'other' {
+    if (cert.certType !== 'OTHER') return 'security_cert'
+    const label = (cert.notes ?? '').toUpperCase()
+    if (/\bDORA\b/.test(label) || /\bGDPR\b/.test(label) || /\bCCPA\b/.test(label)) return 'privacy_framework'
+    if (/EU.US DPF|UK.DPF|SWISS.US DPF|\bCBPR\b|\bPRP\b/.test(label)) return 'privacy_framework'
+    if (/NIST\s*CSF/.test(label)) return 'other'
+    return 'security_cert'
+  }
+
   const autoCerts = certifications.filter(c => c.sourceType !== 'MANUAL')
   const manualCerts = certifications.filter(c => c.sourceType === 'MANUAL')
+
+  const securityAutoCerts = autoCerts.filter(c => getCertCategory(c) === 'security_cert')
+  const regulatoryAutoCerts = autoCerts.filter(c => getCertCategory(c) === 'privacy_framework')
+  const otherAutoCerts = autoCerts.filter(c => getCertCategory(c) === 'other')
 
   // Sanctions and Trust-certs have extra detail sections
   const sanctionsMatches = dimension === 'SANCTIONS'
@@ -808,7 +821,6 @@ export default function DimensionCard({
     ? (sd.scrape_metadata as Record<string, unknown> | undefined)?.agent as {
         state: string; confidence: string; sourceUrl: string | null; sourceTier: string | null
         platform: string | null; warning: string
-        privacy_frameworks?: Array<{ certType: string; rawLabel: string }>
       } | undefined
     : undefined
 
@@ -997,20 +1009,6 @@ export default function DimensionCard({
                 )}
               </div>
               <p className="text-[12px] text-[#5B5478] mt-2 leading-relaxed">{agentResult.warning}</p>
-              {agentResult.privacy_frameworks && agentResult.privacy_frameworks.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-1.5">
-                    Privacy frameworks (self-certified)
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {agentResult.privacy_frameworks.map((pf, i) => (
-                      <span key={i} className="text-[12px] bg-[#F9F8FD] text-[#5B5478] border border-[#E2DFF0] px-2 py-0.5 rounded-full">
-                        {pf.rawLabel}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -1099,192 +1097,205 @@ export default function DimensionCard({
             </p>
           )}
 
-          {/* TRUST_CERTS: auto-discovered certs from trust-finder */}
+          {/* TRUST_CERTS: certifications & frameworks — three groups */}
           {dimension === 'TRUST_CERTS' && autoCerts.length > 0 && (
             <div>
-              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
-                Auto-discovered certifications
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-3">
+                Certifications & frameworks
               </p>
-              <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
-                {autoCerts.map(cert => {
-                  const isVerified = cert.verifiedBy != null
-                  const platformLabel = cert.sourceType === 'AUTO_VANTA' ? 'Vanta'
-                    : cert.sourceType === 'AUTO_SAFEBASE' ? 'SafeBase'
-                    : 'Web'
-                  const displayName = cert.certType === 'OTHER' && cert.notes
-                    ? cert.notes
-                    : (CERT_LABELS[cert.certType] ?? cert.certType)
+              <div className="space-y-3">
+                {([
+                  { label: 'Security certifications',          certs: securityAutoCerts },
+                  { label: 'Regulatory & privacy frameworks',  certs: regulatoryAutoCerts },
+                  { label: 'Other frameworks',                 certs: otherAutoCerts },
+                ] as const).map(({ label, certs }) => certs.length === 0 ? null : (
+                  <div key={label}>
+                    <p className="text-[11px] text-[#5B5478] font-medium mb-1.5">{label}</p>
+                    <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
+                      {certs.map(cert => {
+                        const isVerified = cert.verifiedBy != null
+                        const platformLabel = cert.sourceType === 'AUTO_VANTA' ? 'Vanta'
+                          : cert.sourceType === 'AUTO_SAFEBASE' ? 'SafeBase'
+                          : 'Web'
+                        const displayName = cert.certType === 'OTHER' && cert.notes
+                          ? cert.notes
+                          : (CERT_LABELS[cert.certType] ?? cert.certType)
 
-                  return (
-                    <div key={cert.id} className="bg-white">
-                      {/* Cert summary row */}
-                      <div className="px-3 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0 space-y-1">
-                            <div className="flex items-center flex-wrap gap-2">
-                              <span className="text-[13px] font-medium text-[#1A1625]">{displayName}</span>
-                              <span className="text-[11px] bg-[#FEF9EE] text-[#BA7517] border border-[#FAEEDA] px-2 py-0.5 rounded-full">
-                                Auto-discovered · {platformLabel}
-                              </span>
-                              {isVerified && (
-                                <span className="text-[11px] bg-[#EAF3DE] text-[#27500A] border border-[#EAF3DE] px-2 py-0.5 rounded-full">
-                                  Verified
-                                </span>
-                              )}
+                        return (
+                          <div key={cert.id} className="bg-white">
+                            <div className="px-3 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0 space-y-1">
+                                  <div className="flex items-center flex-wrap gap-2">
+                                    <span className="text-[13px] font-medium text-[#1A1625]">{displayName}</span>
+                                    <span className="text-[11px] bg-[#FEF9EE] text-[#BA7517] border border-[#FAEEDA] px-2 py-0.5 rounded-full">
+                                      Auto-discovered · {platformLabel}
+                                    </span>
+                                    {isVerified && (
+                                      <span className="text-[11px] bg-[#EAF3DE] text-[#27500A] border border-[#EAF3DE] px-2 py-0.5 rounded-full">
+                                        Verified
+                                      </span>
+                                    )}
+                                  </div>
+                                  {cert.issuingBody && (
+                                    <p className="text-[12px] text-[#8B85A8]">{cert.issuingBody}</p>
+                                  )}
+                                  <div className="flex flex-wrap gap-3 text-[12px]">
+                                    {cert.auditPeriodStart || cert.auditPeriodEnd ? (
+                                      <span className="text-[#5B5478]">
+                                        Audit: {cert.auditPeriodStart ? new Date(cert.auditPeriodStart).toLocaleDateString('en-GB') : '—'}
+                                        {' – '}
+                                        {cert.auditPeriodEnd ? new Date(cert.auditPeriodEnd).toLocaleDateString('en-GB') : '—'}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[#B8B3CE]">Audit period: not verified</span>
+                                    )}
+                                    {cert.expiryDate ? (
+                                      <span className="text-[#5B5478]">
+                                        Expires {new Date(cert.expiryDate).toLocaleDateString('en-GB')}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[#B8B3CE]">Expiry: not verified</span>
+                                    )}
+                                  </div>
+                                  {cert.sourceUrl && (
+                                    <a
+                                      href={cert.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[12px] text-[#5B3FD4] hover:text-[#3C3489] block truncate"
+                                    >
+                                      {cert.sourceUrl}
+                                    </a>
+                                  )}
+                                </div>
+                                {canOverride && verifyCertId !== cert.id && (
+                                  <button
+                                    onClick={() => {
+                                      setVerifyCertId(cert.id)
+                                      setVerifyCertForm({
+                                        certType: cert.certType,
+                                        issuingBody: cert.issuingBody ?? '',
+                                        auditPeriodStart: '',
+                                        auditPeriodEnd: '',
+                                        expiryDate: '',
+                                        sourceUrl: cert.sourceUrl ?? '',
+                                        notes: cert.certType === 'OTHER' ? '' : (cert.notes ?? ''),
+                                      })
+                                      setVerifyError(null)
+                                    }}
+                                    className="flex-shrink-0 text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                                  >
+                                    Verify
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            {cert.issuingBody && (
-                              <p className="text-[12px] text-[#8B85A8]">{cert.issuingBody}</p>
-                            )}
-                            <div className="flex flex-wrap gap-3 text-[12px]">
-                              {cert.auditPeriodStart || cert.auditPeriodEnd ? (
-                                <span className="text-[#5B5478]">
-                                  Audit: {cert.auditPeriodStart ? new Date(cert.auditPeriodStart).toLocaleDateString('en-GB') : '—'}
-                                  {' – '}
-                                  {cert.auditPeriodEnd ? new Date(cert.auditPeriodEnd).toLocaleDateString('en-GB') : '—'}
-                                </span>
-                              ) : (
-                                <span className="text-[#B8B3CE]">Audit period: not verified</span>
-                              )}
-                              {cert.expiryDate ? (
-                                <span className="text-[#5B5478]">
-                                  Expires {new Date(cert.expiryDate).toLocaleDateString('en-GB')}
-                                </span>
-                              ) : (
-                                <span className="text-[#B8B3CE]">Expiry: not verified</span>
-                              )}
-                            </div>
-                            {cert.sourceUrl && (
-                              <a
-                                href={cert.sourceUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[12px] text-[#5B3FD4] hover:text-[#3C3489] block truncate"
-                              >
-                                {cert.sourceUrl}
-                              </a>
-                            )}
-                          </div>
-                          {canOverride && verifyCertId !== cert.id && (
-                            <button
-                              onClick={() => {
-                                setVerifyCertId(cert.id)
-                                setVerifyCertForm({
-                                  certType: cert.certType,
-                                  issuingBody: cert.issuingBody ?? '',
-                                  auditPeriodStart: '',
-                                  auditPeriodEnd: '',
-                                  expiryDate: '',
-                                  sourceUrl: cert.sourceUrl ?? '',
-                                  notes: cert.certType === 'OTHER' ? '' : (cert.notes ?? ''),
-                                })
-                                setVerifyError(null)
-                              }}
-                              className="flex-shrink-0 text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
-                            >
-                              Verify
-                            </button>
-                          )}
-                        </div>
-                      </div>
 
-                      {/* Inline verify form */}
-                      {verifyCertId === cert.id && canOverride && (
-                        <div className="border-t border-[#E2DFF0] bg-[#F9F8FD] px-4 py-4 space-y-3">
-                          <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
-                            Verify — fill in dates from the actual cert report
-                          </p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="sm:col-span-2">
-                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Cert type</label>
-                              <select
-                                value={verifyCertForm.certType}
-                                onChange={e => setVerifyCertForm(p => ({ ...p, certType: e.target.value }))}
-                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
-                              >
-                                {CERT_TYPE_OPTIONS.map(o => (
-                                  <option key={o.value} value={o.value}>{o.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
-                                Issuing body <span className="normal-case text-[#B8B3CE]">(optional)</span>
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="e.g. AICPA, BSI, IASME"
-                                value={verifyCertForm.issuingBody}
-                                onChange={e => setVerifyCertForm(p => ({ ...p, issuingBody: e.target.value }))}
-                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
-                                Expiry date <span className="normal-case text-[#B8B3CE]">(from report)</span>
-                              </label>
-                              <input
-                                type="date"
-                                value={verifyCertForm.expiryDate}
-                                onChange={e => setVerifyCertForm(p => ({ ...p, expiryDate: e.target.value }))}
-                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
-                                Audit period start <span className="normal-case text-[#B8B3CE]">(from report)</span>
-                              </label>
-                              <input
-                                type="date"
-                                value={verifyCertForm.auditPeriodStart}
-                                onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodStart: e.target.value }))}
-                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
-                                Audit period end <span className="normal-case text-[#B8B3CE]">(from report)</span>
-                              </label>
-                              <input
-                                type="date"
-                                value={verifyCertForm.auditPeriodEnd}
-                                onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodEnd: e.target.value }))}
-                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
-                              />
-                            </div>
-                            <div className="sm:col-span-2">
-                              <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
-                                Notes <span className="normal-case text-[#B8B3CE]">(optional)</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={verifyCertForm.notes}
-                                onChange={e => setVerifyCertForm(p => ({ ...p, notes: e.target.value.slice(0, 500) }))}
-                                className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
-                              />
-                            </div>
+                            {/* Inline verify form */}
+                            {verifyCertId === cert.id && canOverride && (
+                              <div className="border-t border-[#E2DFF0] bg-[#F9F8FD] px-4 py-4 space-y-3">
+                                <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
+                                  Verify — fill in dates from the actual cert report
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="sm:col-span-2">
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Cert type</label>
+                                    <select
+                                      value={verifyCertForm.certType}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, certType: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    >
+                                      {CERT_TYPE_OPTIONS.map(o => (
+                                        <option key={o.value} value={o.value}>{o.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Issuing body <span className="normal-case text-[#B8B3CE]">(optional)</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. AICPA, BSI, IASME"
+                                      value={verifyCertForm.issuingBody}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, issuingBody: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Expiry date <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={verifyCertForm.expiryDate}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, expiryDate: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Audit period start <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={verifyCertForm.auditPeriodStart}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodStart: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Audit period end <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={verifyCertForm.auditPeriodEnd}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodEnd: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Notes <span className="normal-case text-[#B8B3CE]">(optional)</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={verifyCertForm.notes}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, notes: e.target.value.slice(0, 500) }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                </div>
+                                {verifyError && <p className="text-[12px] text-[#791F1F]">{verifyError}</p>}
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleVerifyCert(cert.id)}
+                                    disabled={verifySaving}
+                                    className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                                  >
+                                    {verifySaving ? 'Saving…' : 'Save as verified'}
+                                  </button>
+                                  <button
+                                    onClick={() => { setVerifyCertId(null); setVerifyCertForm(EMPTY_CERT_FORM); setVerifyError(null) }}
+                                    className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          {verifyError && <p className="text-[12px] text-[#791F1F]">{verifyError}</p>}
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleVerifyCert(cert.id)}
-                              disabled={verifySaving}
-                              className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
-                            >
-                              {verifySaving ? 'Saving…' : 'Save as verified'}
-                            </button>
-                            <button
-                              onClick={() => { setVerifyCertId(null); setVerifyCertForm(EMPTY_CERT_FORM); setVerifyError(null) }}
-                              className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                        )
+                      })}
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
+              <p className="text-[11px] text-[#B8B3CE] mt-2">
+                Scoring reflects security certifications only; regulatory frameworks and standards are shown for context.
+              </p>
             </div>
           )}
 

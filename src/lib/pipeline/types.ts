@@ -121,10 +121,12 @@ export interface TrustCertFound {
   issuingBody?: string
   sourceUrl?: string
   notes?: string       // rawLabel for certs that mapped to OTHER
+  category?: 'security_cert' | 'privacy_framework' | 'other'
 }
 
 export interface TrustPortalsData {
-  certs_found: TrustCertFound[]
+  certs_found: TrustCertFound[]          // security_cert items only — used for scoring
+  frameworks_found?: TrustCertFound[]    // privacy_framework + other items — display only, not scored
   status: 'found' | 'inconclusive' | 'not_found'
   scrape_metadata: {
     iasme?: ScrapeMeta

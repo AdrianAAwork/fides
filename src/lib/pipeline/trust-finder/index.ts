@@ -16,32 +16,40 @@ export function adaptFindingToTrustPortals(finding: TrustFinding): TrustPortalsD
       ? 'not_found'
       : 'inconclusive'
 
-  // Only security_certs go into certs_found. Privacy frameworks stay in the agent blob.
-  const securityCerts = finding.certsClaimed.filter((c) => c.category === 'security_cert')
-
-  // Deduplicate by certType (first occurrence wins)
-  const seen = new Set<string>()
-  const certs_found: TrustCertFound[] = []
-  for (const c of securityCerts) {
-    const enumType = CERT_TYPE_ENUM.has(c.certType) ? c.certType : 'OTHER'
-    if (seen.has(enumType)) continue
-    seen.add(enumType)
-    certs_found.push({
-      certType: enumType,
-      source: finding.platform ?? 'trust-finder',
-      // expiryDate: never populated — agent has no verified dates
-      issuingBody: c.auditor ?? undefined,
-      sourceUrl: finding.sourceUrl ?? undefined,
-      notes: enumType === 'OTHER' ? c.rawLabel : undefined,
-    })
+  function buildCertList(certs: typeof finding.certsClaimed): TrustCertFound[] {
+    // Deduplicate by original certType (not enumType) so PCI_PIN and PCI_3DS
+    // both survive even though both map to 'OTHER' in the DB enum.
+    const seen = new Set<string>()
+    const out: TrustCertFound[] = []
+    for (const c of certs) {
+      if (seen.has(c.certType)) continue
+      seen.add(c.certType)
+      const enumType = CERT_TYPE_ENUM.has(c.certType) ? c.certType : 'OTHER'
+      out.push({
+        certType: enumType,
+        source: finding.platform ?? 'trust-finder',
+        issuingBody: c.auditor ?? undefined,
+        sourceUrl: finding.sourceUrl ?? undefined,
+        notes: enumType === 'OTHER' ? c.rawLabel : undefined,
+        category: c.category,
+      })
+    }
+    return out
   }
 
-  const privacyFrameworks = finding.certsClaimed
-    .filter((c) => c.category === 'privacy_framework')
-    .map((c) => ({ certType: c.certType, rawLabel: c.rawLabel }))
+  // certs_found = security_cert only → used for scoring (unchanged)
+  const certs_found = buildCertList(
+    finding.certsClaimed.filter((c) => c.category === 'security_cert')
+  )
+
+  // frameworks_found = privacy_framework + other → display only, persisted to DB but not scored
+  const frameworks_found = buildCertList(
+    finding.certsClaimed.filter((c) => c.category !== 'security_cert')
+  )
 
   return {
     certs_found,
+    frameworks_found,
     status,
     scrape_metadata: {
       agent: {
@@ -51,7 +59,6 @@ export function adaptFindingToTrustPortals(finding: TrustFinding): TrustPortalsD
         sourceTier: finding.sourceTier,
         platform: finding.platform,
         warning: finding.warning,
-        privacy_frameworks: privacyFrameworks,
         trace: finding.trace,
       },
     },
