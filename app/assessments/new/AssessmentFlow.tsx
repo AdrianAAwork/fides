@@ -11,6 +11,7 @@ interface ChResult {
 }
 
 interface PipelineEvent {
+  suggestedOverallBand?: string
   type: 'step' | 'complete' | 'error'
   step?: string
   status?: 'running' | 'done' | 'warn'
@@ -69,6 +70,7 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
     id: string
     riskTier: string
     overallScore: number
+    suggestedOverallBand?: string
   } | null>(null)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
   const [vendorDomain, setVendorDomain] = useState('')
@@ -176,6 +178,7 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
                 id: event.assessmentId!,
                 riskTier: event.riskTier!,
                 overallScore: event.overallScore!,
+                suggestedOverallBand: event.suggestedOverallBand,
               })
               setFlowStep('complete')
             } else if (event.type === 'error') {
@@ -453,7 +456,10 @@ export default function AssessmentFlow({ prefill }: AssessmentFlowProps) {
           }`}>
             {completedAssessment.riskTier}
           </span>
-          <span className="text-[13px] text-[#8B85A8]">Score: {completedAssessment.overallScore}/100</span>
+          {completedAssessment.suggestedOverallBand
+            ? <span className="text-[13px] text-[#8B85A8]">{completedAssessment.suggestedOverallBand} (pending analyst confirmation)</span>
+            : <span className="text-[13px] text-[#8B85A8]">Score: {completedAssessment.overallScore}/100</span>
+          }
         </div>
         <button
           onClick={() => router.push(`/assessments/${completedAssessment.id}`)}

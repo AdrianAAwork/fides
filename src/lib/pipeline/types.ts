@@ -26,6 +26,9 @@ export interface CompaniesHouseData {
   company_status: string
   date_of_creation?: string
   registered_office_address?: Record<string, string>
+  jurisdiction?: string              // CH top-level jurisdiction (UK registration domain for FC companies)
+  foreignOriginatingCountry?: string // foreign_company_details.originating_registry.country — home country for FC companies
+  foreignGoverningLaw?: string       // foreign_company_details.governed_by — may also carry home country
   sic_codes?: string[]
   type?: string
   accounts?: {
@@ -163,7 +166,34 @@ export interface ExecSummaryResult {
   status: 'checked' | 'summary_unavailable'
 }
 
-// ─── Scoring ──────────────────────────────────────────────────────────────────
+// ─── Trust Bands ─────────────────────────────────────────────────────────────
+
+export type TrustBand = 'High' | 'Medium' | 'Low' | 'Not assessed' | 'Needs review'
+
+// Easily-changed label constant — swap this to rename across the product.
+export const FIDES_TRUST_LABEL = 'Fides Suggested Trust'
+
+export interface DimensionBand {
+  dimension: string
+  suggestedBand: TrustBand
+  sourceData: Record<string, unknown>
+  fetchedAt: Date
+}
+
+export interface PipelineBands {
+  financial_health: DimensionBand
+  breach_history: DimensionBand
+  sanctions: DimensionBand
+  ownership: DimensionBand
+  trust_certs: DimensionBand
+  news_sentiment: DimensionBand
+  suggestedOverallBand: TrustBand
+  // Kept for backward-compat callers (reassessment schedule, audit log, PDF)
+  riskTier: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  overallScore: number
+}
+
+// ─── Legacy scoring (kept for reading old stored data) ────────────────────────
 
 export interface DimensionScore {
   dimension: string

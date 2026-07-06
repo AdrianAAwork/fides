@@ -4,7 +4,7 @@ import type {
   NewsSentimentResult,
   ExecSummaryResult,
   NewsArticle,
-  PipelineScores,
+  PipelineBands,
   TrustPortalsData,
   GleifData,
   HibpData,
@@ -167,7 +167,7 @@ const CERT_DISPLAY: Record<string, string> = {
 }
 
 export async function callExecSummary(
-  scores: PipelineScores,
+  bands: PipelineBands,
   vendorName: string,
   context: ExecSummaryContext,
 ): Promise<ExecSummaryResult> {
@@ -227,11 +227,15 @@ Reply with a single JSON object using EXACTLY these three keys — no wrapper, n
 
   const findings = {
     vendor: vendorName,
-    overall_score: scores.overallScore,
-    risk_tier: scores.riskTier,
-    dimension_scores: Object.entries(scores)
-      .filter(([k]) => !['overallScore', 'riskTier'].includes(k))
-      .map(([k, v]) => ({ dimension: k, score: (v as { finalScore: number }).finalScore })),
+    suggested_overall_band: bands.suggestedOverallBand,
+    dimension_bands: [
+      bands.financial_health,
+      bands.breach_history,
+      bands.sanctions,
+      bands.ownership,
+      bands.trust_certs,
+      bands.news_sentiment,
+    ].map(d => ({ dimension: d.dimension, suggested_band: d.suggestedBand })),
     gleif_record_found: gleifHasRecord,
     gleif_context: gleifNote,
     trust_cert_status: context.trustPortals.status,

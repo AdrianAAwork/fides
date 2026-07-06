@@ -158,18 +158,18 @@ export async function DELETE(
 
       // 4. Recalculate overall
       const allScores = await tx
-        .select({ dimension: assessmentScores.dimension, finalScore: assessmentScores.finalScore, sourceData: assessmentScores.sourceData })
+        .select({ dimension: assessmentScores.dimension, finalScore: assessmentScores.finalScore, sourceData: assessmentScores.sourceData, suggestedBand: assessmentScores.suggestedBand, confirmedBand: assessmentScores.confirmedBand })
         .from(assessmentScores)
         .where(eq(assessmentScores.assessmentId, assessmentId))
 
       const updatedScores = allScores.map(s =>
         s.dimension === 'TRUST_CERTS' ? { ...s, finalScore: newFinalScore } : s
       )
-      const { overallScore, riskTier } = recalculateOverall(updatedScores)
+      const { overallScore, riskTier, suggestedOverallBand } = recalculateOverall(updatedScores)
 
       await tx
         .update(assessments)
-        .set({ overallScore, riskTier, updatedAt: new Date() })
+        .set({ overallScore: overallScore || null, riskTier, suggestedOverallBand: suggestedOverallBand ?? null, updatedAt: new Date() })
         .where(eq(assessments.id, assessmentId))
     }
 

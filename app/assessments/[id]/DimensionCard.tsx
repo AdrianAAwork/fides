@@ -22,10 +22,16 @@ export interface CertRow {
 interface Props {
   dimension: string
   label: string
-  weight: number
+  // Band fields (new assessments)
+  suggestedBand: string | null
+  confirmedBand: string | null
+  confirmedBy: string | null
+  confirmedAt: Date | string | null
+  analystNote: string | null
+  isOverridden: boolean
+  // Legacy numeric fields (old assessments without bands)
   finalScore: number
   rawScore: number
-  isOverridden: boolean
   overrideReason: string | null
   overriddenAt: Date | string | null
   sourceData: Record<string, unknown> | null
@@ -77,7 +83,7 @@ const HIGH_JURISDICTIONS = new Set([
   'NL','PL','PT','RO','SE','SI','SK',
 ])
 
-// ── Score colour ──────────────────────────────────────────────────────────────
+// ── Score colour (legacy) ─────────────────────────────────────────────────────
 
 function scoreTextColor(s: number): string {
   if (s >= 80) return 'text-[#3B6D11]'
@@ -90,6 +96,23 @@ function scoreBarColor(s: number): string {
   if (s >= 50) return 'bg-[#BA7517]'
   return 'bg-[#A32D2D]'
 }
+
+// ── Band helpers ──────────────────────────────────────────────────────────────
+
+const BAND_COLORS: Record<string, { text: string; bg: string; border: string }> = {
+  'High':         { text: 'text-[#27500A]', bg: 'bg-[#EAF3DE]', border: 'border-[#C5DFA8]' },
+  'Medium':       { text: 'text-[#633806]', bg: 'bg-[#FAEEDA]', border: 'border-[#F0D5A0]' },
+  'Low':          { text: 'text-[#791F1F]', bg: 'bg-[#FCEBEB]', border: 'border-[#F5C6C6]' },
+  'Needs review': { text: 'text-[#3C3489]', bg: 'bg-[#EEEDFE]', border: 'border-[#C9C4F8]' },
+  'Not assessed': { text: 'text-[#5B5478]', bg: 'bg-[#F9F8FD]', border: 'border-[#E2DFF0]' },
+}
+
+function bandColors(band: string) {
+  return BAND_COLORS[band] ?? BAND_COLORS['Not assessed']
+}
+
+const TRUST_BAND_OPTIONS = ['High', 'Medium', 'Low', 'Needs review', 'Not assessed'] as const
+type TrustBandOption = typeof TRUST_BAND_OPTIONS[number]
 
 // ── Error categorisation ──────────────────────────────────────────────────────
 
@@ -204,7 +227,7 @@ function friendlyPortalStatus(
 // ── Explanation builders ──────────────────────────────────────────────────────
 
 function explainFinancialHealth(sd: Record<string, unknown>, score: number): Step[] {
-  const steps: Step[] = [{ text: 'Started at 100.', type: 'base' }]
+  const steps: Step[] = []
 
   // Was data successfully fetched?
   if (sd.error) {
@@ -273,7 +296,6 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
     })
   }
 
-  steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
@@ -282,7 +304,7 @@ function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[
   if (sd.enabled === false) {
     return [
       {
-        text: 'Breach history checking via Have I Been Pwned is not configured for this deployment. A neutral score of 75 was applied.',
+        text: 'Breach history checking via Have I Been Pwned is not configured for this deployment. This dimension is shown as Not assessed — it does not indicate the vendor is clean.',
         type: 'info',
         action: 'Ask your administrator to enable HIBP integration, or check the vendor domain manually at haveibeenpwned.com.',
       },
@@ -300,31 +322,31 @@ function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[
 
     return [
       {
-        text: `Breach data could not be retrieved. ${reason} A neutral score of 75 was applied — this does not indicate the vendor is clean.`,
+        text: `Breach data could not be retrieved. ${reason} This dimension is shown as Not assessed — it does not indicate the vendor is clean.`,
         type: 'warning',
         action,
       },
     ]
   }
 
-  const steps: Step[] = [{ text: 'Started at 100.', type: 'base' }]
+  const steps: Step[] = []
   const breaches = (sd.breaches as Array<{ Name: string; BreachDate: string; DataClasses?: string[] }>) ?? []
   const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 24)
 
   if (breaches.length === 0) {
     steps.push({ text: 'No breaches found on the vendor\'s domain.', type: 'positive' })
   } else {
+    steps.push({ text: `${breaches.length} breach${breaches.length !== 1 ? 'es' : ''} found. Fides cannot assess severity or remediation — analyst judgment required.`, type: 'warning' })
     for (const b of breaches) {
       const recent = new Date(b.BreachDate) >= cutoff
       const classes = b.DataClasses?.slice(0, 3).join(', ')
       steps.push({
-        text: `"${b.Name}" (${b.BreachDate})${classes ? ` — data types: ${classes}` : ''}: ${recent ? '−25 (within 24 months)' : '−10 (older than 24 months)'}`,
+        text: `"${b.Name}" (${b.BreachDate})${classes ? ` — data types: ${classes}` : ''}${recent ? ' — within 24 months' : ' — older than 24 months'}`,
         type: 'deduction',
       })
     }
   }
 
-  steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
@@ -464,7 +486,6 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
   }
 
   if (parent?.name) steps.push({ text: `Ultimate parent: ${parent.name}${parent.lei ? ` (LEI: ${parent.lei})` : ''}`, type: 'info' })
-  steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
@@ -516,7 +537,7 @@ function explainTrustCerts(sd: Record<string, unknown>, score: number): Step[] {
           : (CERT_LABELS[cert.certType] ?? cert.certType)
         steps.push({ text: `${label}: +${pts}`, type: 'positive' })
       }
-      steps.push({ text: `Final score: ${score} (capped at 100).`, type: 'base' })
+      steps.push({ text: `Auto-discovered certs shown above. Analyst confirms which are relevant.`, type: 'info' })
     }
   }
 
@@ -649,11 +670,23 @@ const EMPTY_CERT_FORM: CertForm = {
 }
 
 export default function DimensionCard({
-  dimension, label, weight, finalScore, rawScore, isOverridden, overrideReason, overriddenAt,
+  dimension, label,
+  suggestedBand, confirmedBand, confirmedBy, confirmedAt, analystNote,
+  isOverridden,
+  finalScore, rawScore, overrideReason, overriddenAt,
   sourceData, fetchedAt, scoreId: _scoreId, assessmentId, canOverride, certifications = [],
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
+
+  // Band confirm/override state
+  const [bandActionOpen, setBandActionOpen] = useState<'confirm' | 'override' | null>(null)
+  const [selectedBand, setSelectedBand] = useState<TrustBandOption>('High')
+  const [bandNote, setBandNote] = useState('')
+  const [bandSaving, setBandSaving] = useState(false)
+  const [bandError, setBandError] = useState<string | null>(null)
+
+  // Legacy numeric override state (old assessments)
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [newScoreVal, setNewScoreVal] = useState(String(finalScore))
   const [overrideReason2, setOverrideReason2] = useState('')
@@ -669,6 +702,35 @@ export default function DimensionCard({
   const [verifyCertForm, setVerifyCertForm] = useState<CertForm>(EMPTY_CERT_FORM)
   const [verifySaving, setVerifySaving] = useState(false)
   const [verifyError, setVerifyError] = useState<string | null>(null)
+
+  async function handleBandSave() {
+    const isOverride = selectedBand !== suggestedBand
+    if (isOverride && bandNote.trim().length < 10) {
+      setBandError('Please add a note (at least 10 characters) explaining the override.')
+      return
+    }
+    setBandError(null)
+    setBandSaving(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/scores/${dimension}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmedBand: selectedBand, note: bandNote.trim() }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setBandError((data as { error?: string }).error ?? 'Failed to save.')
+        return
+      }
+      setBandActionOpen(null)
+      setBandNote('')
+      router.refresh()
+    } catch {
+      setBandError('Network error. Please try again.')
+    } finally {
+      setBandSaving(false)
+    }
+  }
 
   async function handleOverrideSave() {
     const ns = Number(newScoreVal)
@@ -824,10 +886,31 @@ export default function DimensionCard({
       } | undefined
     : undefined
 
+  // IASME registry check result — shown for both new and legacy assessments
+  type ScrapeMetaEntry = { attempted: boolean; http_status?: number; found: boolean; keywords_found?: string[]; error?: string | null }
+  const iasmeResult = dimension === 'TRUST_CERTS'
+    ? (sd.scrape_metadata as Record<string, ScrapeMetaEntry> | undefined)?.iasme
+    : undefined
+
   // Legacy portal table (old assessments that pre-date trust-finder)
   const scrapeMeta = dimension === 'TRUST_CERTS' && !agentResult
-    ? (sd.scrape_metadata as Record<string, { attempted: boolean; http_status?: number; found: boolean; keywords_found?: string[]; error?: string | null }> | undefined)
+    ? (sd.scrape_metadata as Record<string, ScrapeMetaEntry> | undefined)
     : undefined
+
+  // ── Render helpers ──────────────────────────────────────────────────────────
+  const isBandMode = suggestedBand != null
+  const isConfirmed = confirmedBand != null
+  const displayBand = confirmedBand ?? suggestedBand
+
+  function BandChip({ band, provisional }: { band: string; provisional?: boolean }) {
+    const c = bandColors(band)
+    return (
+      <span className={`inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-0.5 rounded-full border ${c.text} ${c.bg} ${c.border} ${provisional ? 'opacity-60' : ''}`}>
+        {provisional && <span className="text-[10px] font-normal">Fides suggests:</span>}
+        {band}
+      </span>
+    )
+  }
 
   return (
     <div className="bg-white rounded-xl border border-[#E2DFF0] overflow-hidden">
@@ -837,22 +920,20 @@ export default function DimensionCard({
         className="w-full px-5 pt-4 pb-3 text-left hover:bg-[#F9F8FD] transition-colors"
         aria-expanded={open}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
-            <span className="text-[11px] text-[#8B85A8] bg-[#F9F8FD] border border-[#E2DFF0] px-1.5 py-0.5 rounded-full">
-              {weight}%
-            </span>
-            {isOverridden && (
-              <span className="text-[11px] bg-[#EEEDFE] text-[#5B3FD4] px-2 py-0.5 rounded-full">
-                Manually adjusted
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {isBandMode ? (
+              displayBand ? (
+                isConfirmed
+                  ? <BandChip band={displayBand} />
+                  : <BandChip band={displayBand} provisional />
+              ) : null
+            ) : (
+              <span className={`text-[14px] font-medium ${scoreTextColor(finalScore)}`}>
+                {finalScore}<span className="text-[#B8B3CE] font-normal text-[12px]">/100</span>
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-[14px] font-medium ${scoreTextColor(finalScore)}`}>
-              {finalScore}<span className="text-[#B8B3CE] font-normal text-[12px]">/100</span>
-            </span>
             <svg
               className={`w-4 h-4 text-[#B8B3CE] transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -861,21 +942,149 @@ export default function DimensionCard({
             </svg>
           </div>
         </div>
-        {/* Progress bar */}
-        <div className="mt-2.5 h-[3px] w-full bg-[#F9F8FD] rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full ${scoreBarColor(finalScore)}`}
-            style={{ width: `${finalScore}%` }}
-          />
-        </div>
+        {/* Legacy progress bar for old assessments */}
+        {!isBandMode && (
+          <div className="mt-2.5 h-[3px] w-full bg-[#F9F8FD] rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full ${scoreBarColor(finalScore)}`}
+              style={{ width: `${finalScore}%` }}
+            />
+          </div>
+        )}
       </button>
 
       {/* ── Expanded panel ─────────────────────────────────────────────────── */}
       {open && (
         <div className="border-t border-[#E2DFF0] px-5 py-5 space-y-5">
 
-          {/* Adjust score button: only visible in expanded panel */}
-          {open && canOverride && !overrideOpen && (
+          {/* ── Band confirm/override (new assessments) ──────────────────── */}
+          {isBandMode && suggestedBand !== 'Not assessed' && (
+            <div className="space-y-3">
+              {/* Confirmation state banner */}
+              {isConfirmed ? (
+                <div className={`rounded-xl px-3 py-2.5 border ${isOverridden ? 'bg-[#EEEDFE] border-[#C9C4F8]' : 'bg-[#F9F8FD] border-[#E2DFF0]'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B5478] font-medium">
+                        {isOverridden ? 'Band overridden by analyst' : 'Band confirmed by analyst'}
+                      </p>
+                      {isOverridden && suggestedBand && (
+                        <p className="text-[12px] text-[#5B5478]">
+                          Fides suggested: <span className="font-medium">{suggestedBand}</span>
+                          {' → '}
+                          <span className="font-medium">{confirmedBand}</span>
+                        </p>
+                      )}
+                      {analystNote && <p className="text-[12px] text-[#5B5478] italic">{analystNote}</p>}
+                      {confirmedBy && confirmedAt && (
+                        <p className="text-[11px] text-[#B8B3CE]">
+                          {confirmedBy} · {new Date(confirmedAt).toLocaleString('en-GB')}
+                        </p>
+                      )}
+                    </div>
+                    {canOverride && bandActionOpen === null && (
+                      <button
+                        onClick={() => {
+                          setSelectedBand((confirmedBand as TrustBandOption) ?? (suggestedBand as TrustBandOption) ?? 'High')
+                          setBandNote('')
+                          setBandActionOpen('override')
+                          setBandError(null)
+                        }}
+                        className="flex-shrink-0 text-[12px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                      >
+                        Change
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                canOverride && bandActionOpen === null && (
+                  <div className="flex items-center justify-between">
+                    <p className="text-[12px] text-[#8B85A8]">Fides suggests: <span className="font-medium text-[#1A1625]">{suggestedBand}</span></p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedBand((suggestedBand as TrustBandOption) ?? 'High')
+                          setBandNote('')
+                          setBandActionOpen('confirm')
+                          setBandError(null)
+                        }}
+                        className="text-[13px] font-medium text-white bg-[#27500A] hover:bg-[#1e3b07] px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedBand((suggestedBand as TrustBandOption) ?? 'High')
+                          setBandNote('')
+                          setBandActionOpen('override')
+                          setBandError(null)
+                        }}
+                        className="text-[13px] font-medium text-[#5B3FD4] hover:text-[#3C3489] border border-[#E2DFF0] bg-white hover:bg-[#F9F8FD] px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Override
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Confirm/override form */}
+              {bandActionOpen !== null && (
+                <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3">
+                  <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
+                    {bandActionOpen === 'confirm' ? 'Confirm band' : 'Override band'}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <label className="text-[12px] text-[#5B5478] w-24 flex-shrink-0">Band</label>
+                    <select
+                      value={selectedBand}
+                      onChange={e => setSelectedBand(e.target.value as TrustBandOption)}
+                      className="rounded-lg border border-[#E2DFF0] px-2 py-1 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                    >
+                      {TRUST_BAND_OPTIONS.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[12px] text-[#5B5478] block mb-1">
+                      Note{selectedBand !== suggestedBand ? ' (required when overriding, min 10 chars)' : ' (optional)'}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={bandNote}
+                      onChange={e => setBandNote(e.target.value)}
+                      placeholder={selectedBand !== suggestedBand
+                        ? 'Explain why you are changing the suggested band…'
+                        : 'Optional note…'
+                      }
+                      className="w-full rounded-lg border border-[#E2DFF0] px-2 py-1.5 text-[14px] text-[#1A1625] focus:outline-none focus:ring-1 focus:ring-[#5B3FD4] resize-none bg-white"
+                    />
+                  </div>
+                  {bandError && <p className="text-[12px] text-[#791F1F]">{bandError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleBandSave}
+                      disabled={bandSaving}
+                      className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                    >
+                      {bandSaving ? 'Saving…' : bandActionOpen === 'confirm' ? 'Confirm' : 'Save override'}
+                    </button>
+                    <button
+                      onClick={() => { setBandActionOpen(null); setBandError(null); setBandNote('') }}
+                      className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Legacy adjust score (old assessments) ────────────────────── */}
+          {!isBandMode && open && canOverride && !overrideOpen && (
             <div className="flex justify-end">
               <button
                 onClick={() => { setOverrideOpen(true); setOverrideError(null) }}
@@ -886,8 +1095,7 @@ export default function DimensionCard({
             </div>
           )}
 
-          {/* Override form */}
-          {overrideOpen && (
+          {!isBandMode && overrideOpen && (
             <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3">
               <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">Adjust score</p>
               <div className="flex items-center gap-3">
@@ -931,8 +1139,8 @@ export default function DimensionCard({
             </div>
           )}
 
-          {/* Override banner */}
-          {isOverridden && (
+          {/* Legacy override banner */}
+          {!isBandMode && isOverridden && (
             <div className="rounded-xl bg-[#EEEDFE] border border-[#E2DFF0] px-3 py-2.5 space-y-0.5">
               <p className="text-[12px] font-medium text-[#5B3FD4]">Manually adjusted</p>
               <p className="text-[12px] text-[#5B3FD4]">Original system score: {rawScore}</p>
@@ -945,10 +1153,10 @@ export default function DimensionCard({
             </div>
           )}
 
-          {/* Score explanation */}
+          {/* Findings / explanation */}
           <div>
             <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-3">
-              How this score was calculated
+              {isBandMode ? 'Findings' : 'How this score was calculated'}
             </p>
             <ul className="space-y-2">
               {steps.map((step, i) => (
@@ -1012,6 +1220,23 @@ export default function DimensionCard({
             </div>
           )}
 
+          {/* TRUST_CERTS: IASME registry check (shown alongside trust-finder and in legacy mode) */}
+          {iasmeResult && iasmeResult.attempted && (
+            <div>
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
+                Registry checks
+              </p>
+              <div className="rounded-xl border border-[#E2DFF0] overflow-hidden bg-white">
+                <div className="px-3 py-2.5 flex items-start justify-between text-xs gap-4">
+                  <span className="text-[#5B5478] font-medium flex-shrink-0">IASME Cyber Essentials</span>
+                  <span className={`text-right ${friendlyPortalStatus(iasmeResult, 'iasme').color}`}>
+                    {friendlyPortalStatus(iasmeResult, 'iasme').text}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TRUST_CERTS: legacy portal table (pre-trust-finder assessments) */}
           {scrapeMeta && (
             <div>
@@ -1019,7 +1244,7 @@ export default function DimensionCard({
                 Portal check results
               </p>
               <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
-                {Object.entries(scrapeMeta).map(([portal, meta]) => {
+                {Object.entries(scrapeMeta).filter(([portal]) => portal !== 'iasme').map(([portal, meta]) => {
                   const { text, color } = friendlyPortalStatus(meta, portal)
                   return (
                     <div key={portal} className="flex items-start justify-between px-3 py-2 text-xs bg-white">
@@ -1294,7 +1519,7 @@ export default function DimensionCard({
                 ))}
               </div>
               <p className="text-[11px] text-[#B8B3CE] mt-2">
-                Scoring reflects security certifications only; regulatory frameworks and standards are shown for context.
+                Band suggestion reflects security certifications only; regulatory frameworks and standards are shown for context.
               </p>
             </div>
           )}

@@ -29,6 +29,8 @@ export default async function AssessmentsPage({
       companiesHouseNumber: assessments.companiesHouseNumber,
       riskTier: assessments.riskTier,
       overallScore: assessments.overallScore,
+      suggestedOverallBand: assessments.suggestedOverallBand,
+      confirmedOverallBand: assessments.confirmedOverallBand,
       assessmentStatus: assessments.assessmentStatus,
       createdAt: assessments.createdAt,
       assessorName: users.displayName,
@@ -104,6 +106,8 @@ export interface AssessmentRow {
   companiesHouseNumber: string | null
   riskTier: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null
   overallScore: number | null
+  suggestedOverallBand: string | null
+  confirmedOverallBand: string | null
   assessmentStatus: 'DRAFT' | 'COMPLETE'
   createdAt: Date
   assessorName: string | null

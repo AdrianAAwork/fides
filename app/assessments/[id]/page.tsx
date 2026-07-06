@@ -6,9 +6,10 @@ import { getDbContext } from '@/src/lib/session'
 import { hasRole } from '@/src/lib/auth'
 import { db } from '@/src/db'
 import { assessments, assessmentScores, users, doraClassification, auditLog, certifications, questionnaires, reassessmentSchedule } from '@/src/db/schema'
-import { and, eq, isNull, desc } from 'drizzle-orm'
+import { and, eq, isNull, desc, inArray } from 'drizzle-orm'
 import DimensionCard from './DimensionCard'
 import type { CertRow } from './DimensionCard'
+import OverallBandConfirm from './OverallBandConfirm'
 import AssessmentActions from './AssessmentActions'
 import DoraCard from './DoraCard'
 import type { DoraRow } from './DoraCard'
@@ -45,10 +46,19 @@ const DIMENSION_WEIGHTS: Record<string, number> = {
 const ACTION_LABELS: Record<string, string> = {
   ASSESSMENT_CREATED: 'Assessment created',
   SCORE_OVERRIDDEN: 'Score adjusted',
+  BAND_CONFIRMED: 'Band confirmed',
   CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
   CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',
   CERT_ADDED: 'Certification added',
   CERT_DELETED: 'Certification removed',
+}
+
+const BAND_COLORS: Record<string, string> = {
+  'High':         'bg-[#EAF3DE] text-[#27500A]',
+  'Medium':       'bg-[#FAEEDA] text-[#633806]',
+  'Low':          'bg-[#FCEBEB] text-[#791F1F]',
+  'Needs review': 'bg-[#EEEDFE] text-[#3C3489]',
+  'Not assessed': 'bg-[#F9F8FD] text-[#5B5478]',
 }
 
 function buildAuditDescription(entry: {
@@ -66,6 +76,18 @@ function buildAuditDescription(entry: {
     const parts: string[] = []
     if (dim) parts.push(dim.replace(/_/g, ' ').toLowerCase())
     if (oldScore != null && newScore != null) parts.push(`${oldScore} → ${newScore}`)
+    if (entry.reason) parts.push(entry.reason)
+    return parts.join(' · ')
+  }
+  if (entry.actionType === 'BAND_CONFIRMED') {
+    const dim = (newVal?.dimension as string | undefined) ?? ''
+    const oldBand = oldVal?.band as string | undefined
+    const newBand = newVal?.band as string | undefined
+    const isOverride = newVal?.isOverride as boolean | undefined
+    const parts: string[] = []
+    if (dim) parts.push(dim === 'OVERALL' ? 'overall' : dim.replace(/_/g, ' ').toLowerCase())
+    if (oldBand && newBand && oldBand !== newBand) parts.push(`${oldBand} → ${newBand}`)
+    else if (newBand && !isOverride) parts.push(`confirmed ${newBand}`)
     if (entry.reason) parts.push(entry.reason)
     return parts.join(' · ')
   }
@@ -182,6 +204,23 @@ export default async function AssessmentDetailPage({
   const canClassify = hasRole(ctx.user.role, 'ANALYST')
   const canDoraOverride = hasRole(ctx.user.role, 'ADMIN')
 
+  // Look up display names for band confirmation attribution
+  const confirmerIds = [
+    ...scores.map(s => s.overriddenBy).filter(Boolean),
+    assessment.confirmedOverallBy,
+  ].filter((id): id is string => id != null)
+  const uniqueConfirmerIds = [...new Set(confirmerIds)]
+  const confirmerNames: Record<string, string> = {}
+  if (uniqueConfirmerIds.length > 0) {
+    const confirmerRows = await db
+      .select({ id: users.id, displayName: users.displayName })
+      .from(users)
+      .where(inArray(users.id, uniqueConfirmerIds))
+    for (const row of confirmerRows) {
+      confirmerNames[row.id] = row.displayName
+    }
+  }
+
   // Compute questionnaire showPrimary conditions
   const STANDARD_JURISDICTIONS = new Set([
     'GB','US','AU','CA','JP','CH','NO','NZ','SG',
@@ -296,7 +335,17 @@ export default async function AssessmentDetailPage({
               </p>
             </div>
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
-              {assessment.riskTier && (
+              {assessment.suggestedOverallBand ? (
+                <OverallBandConfirm
+                  assessmentId={id}
+                  suggestedOverallBand={assessment.suggestedOverallBand}
+                  confirmedOverallBand={assessment.confirmedOverallBand ?? null}
+                  confirmedOverallNote={assessment.confirmedOverallNote ?? null}
+                  confirmedBy={assessment.confirmedOverallBy ? (confirmerNames[assessment.confirmedOverallBy] ?? null) : null}
+                  confirmedAt={assessment.confirmedOverallAt ?? null}
+                  canOverride={canOverride}
+                />
+              ) : assessment.riskTier ? (
                 <>
                   <span className={`inline-flex items-center px-4 py-1 rounded-full text-[14px] font-medium ${TIER_COLORS[assessment.riskTier] ?? 'bg-[#F9F8FD] text-[#5B5478]'}`}>
                     {assessment.riskTier}
@@ -307,7 +356,7 @@ export default async function AssessmentDetailPage({
                     </span>
                   )}
                 </>
-              )}
+              ) : null}
               <a
                 href={`/api/assessments/${id}/pdf`}
                 download
@@ -389,10 +438,10 @@ export default async function AssessmentDetailPage({
           </div>
         )}
 
-        {/* ── Dimension scores ───────────────────────────────────────────────── */}
+        {/* ── Trust assessment ───────────────────────────────────────────────── */}
         <div>
           <p className="text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-3 px-1">
-            Dimension scores
+            Trust assessment
             <span className="ml-2 normal-case text-[#B8B3CE]">· click a card to expand</span>
           </p>
           <div className="space-y-2">
@@ -401,12 +450,7 @@ export default async function AssessmentDetailPage({
               if (!score) {
                 return (
                   <div key={dim} className="bg-white rounded-xl border border-[#E2DFF0] px-5 py-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
-                      <span className="text-[11px] text-[#8B85A8] bg-[#F9F8FD] border border-[#E2DFF0] px-1.5 py-0.5 rounded-full">
-                        {DIMENSION_WEIGHTS[dim]}%
-                      </span>
-                    </div>
+                    <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
                     <p className="text-[13px] text-[#B8B3CE] mt-2">No data available</p>
                   </div>
                 )
@@ -416,10 +460,14 @@ export default async function AssessmentDetailPage({
                   key={dim}
                   dimension={dim}
                   label={label}
-                  weight={DIMENSION_WEIGHTS[dim]}
+                  suggestedBand={score.suggestedBand ?? null}
+                  confirmedBand={score.confirmedBand ?? null}
+                  confirmedBy={score.overriddenBy ? (confirmerNames[score.overriddenBy] ?? null) : null}
+                  confirmedAt={score.overriddenAt ?? null}
+                  analystNote={score.overrideReason ?? null}
+                  isOverridden={score.isOverridden}
                   finalScore={score.finalScore}
                   rawScore={score.rawScore}
-                  isOverridden={score.isOverridden}
                   overrideReason={score.overrideReason}
                   overriddenAt={score.overriddenAt}
                   sourceData={score.sourceData as Record<string, unknown> | null}
