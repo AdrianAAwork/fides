@@ -241,9 +241,9 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
   }
 
   const status = sd.company_status as string | undefined
-  // Only show the status deduction if data was actually fetched (not the 'unknown' fallback from no CH number)
+  // Only show the status finding if data was actually fetched (not the 'unknown' fallback from no CH number)
   if (status && status !== 'active' && status !== 'unknown') {
-    steps.push({ text: `Company status is "${status}" (not active): −60`, type: 'deduction' })
+    steps.push({ text: `Company status is "${status}" (not active).`, type: 'deduction' })
   } else if (status === 'unknown' && !sd.error) {
     steps.push({ text: 'No Companies House number was provided — company status could not be checked.', type: 'info' })
   } else if (status === 'active') {
@@ -252,11 +252,11 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
 
   const acc = sd.accounts as { overdue?: boolean; next_due?: string } | undefined
   if (acc?.overdue) {
-    steps.push({ text: 'Annual accounts are overdue: −40', type: 'deduction' })
+    steps.push({ text: 'Annual accounts are overdue.', type: 'deduction' })
   } else if (acc?.next_due) {
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 18)
     if (new Date(acc.next_due) < cutoff) {
-      steps.push({ text: `No accounts filed in the last 18 months (next due: ${acc.next_due}): −30`, type: 'deduction' })
+      steps.push({ text: `No accounts filed in the last 18 months (next due: ${acc.next_due}).`, type: 'deduction' })
     } else {
       steps.push({ text: `Annual accounts next due: ${acc.next_due}. Up to date.`, type: 'positive' })
     }
@@ -266,7 +266,7 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
 
   const cs = sd.confirmation_statement as { overdue?: boolean; next_due?: string } | undefined
   if (cs?.overdue) {
-    steps.push({ text: 'Confirmation statement is overdue: −20', type: 'deduction' })
+    steps.push({ text: 'Confirmation statement is overdue.', type: 'deduction' })
   } else if (cs?.next_due) {
     steps.push({ text: `Confirmation statement next due: ${cs.next_due}. Up to date.`, type: 'positive' })
   }
@@ -277,7 +277,7 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
 
   if (gc?.status === 'checked') {
     if (gc.going_concern) {
-      steps.push({ text: `Going concern warning detected in accounts (AI confidence: ${gc.confidence}): −30`, type: 'deduction' })
+      steps.push({ text: `Going concern warning detected in accounts (AI confidence: ${gc.confidence}).`, type: 'deduction' })
       if (gc.summary) steps.push({ text: `AI note: "${gc.summary}"`, type: 'warning' })
     } else {
       steps.push({ text: 'No going concern warning found in the latest filing text.', type: 'positive' })
@@ -290,7 +290,7 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
     })
   } else if (gc?.status === 'summary_unavailable') {
     steps.push({
-      text: 'AI going concern analysis was temporarily unavailable and was skipped. No deduction was applied.',
+      text: 'AI going concern analysis was temporarily unavailable and was skipped.',
       type: 'info',
       action: 'Review the auditor\'s report in the latest accounts directly on Companies House.',
     })
@@ -342,7 +342,7 @@ function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[
       const classes = b.DataClasses?.slice(0, 3).join(', ')
       steps.push({
         text: `"${b.Name}" (${b.BreachDate})${classes ? ` — data types: ${classes}` : ''}${recent ? ' — within 24 months' : ' — older than 24 months'}`,
-        type: 'deduction',
+        type: 'warning',
       })
     }
   }
@@ -363,7 +363,7 @@ function explainSanctions(sd: Record<string, unknown>): Step[] {
     }
     return [
       {
-        text: 'The sanctions database could not be queried. A score of 100 was applied but this result is unreliable.',
+        text: 'The sanctions database could not be queried. This result is unreliable — a manual check is required.',
         type: 'warning',
         action,
       },
@@ -385,21 +385,21 @@ function explainSanctions(sd: Record<string, unknown>): Step[] {
   })
 
   if (matches.length === 0) {
-    steps.push({ text: 'No matches found across all lists. Score: 100.', type: 'positive' })
+    steps.push({ text: 'No matches found across all lists.', type: 'positive' })
   } else {
     const confirmed = matches.filter(m => m.level === 'confirmed')
     const possible  = matches.filter(m => m.level === 'possible')
 
     if (confirmed.length) {
       steps.push({
-        text: `${confirmed.length} confirmed sanctions match${confirmed.length !== 1 ? 'es' : ''}. Score forced to 0.`,
+        text: `${confirmed.length} confirmed sanctions match${confirmed.length !== 1 ? 'es' : ''} found.`,
         type: 'deduction',
         action: 'This requires immediate escalation to your compliance team. Do not proceed with this vendor without authorisation.',
       })
     }
     if (possible.length) {
       steps.push({
-        text: `${possible.length} possible sanctions match${possible.length !== 1 ? 'es' : ''} (high name similarity but below confirmation threshold). Score set to 40.`,
+        text: `${possible.length} possible sanctions match${possible.length !== 1 ? 'es' : ''} (high name similarity but below confirmation threshold).`,
         type: 'warning',
         action: 'Review the matched entries below and verify whether they relate to this vendor. Common names may produce false positives.',
       })
@@ -422,7 +422,7 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
     steps.push({
       text: `GLEIF entity matched via name search (no registry number match). Legal name on record: "${legalName ?? 'unknown'}". This may not be the same legal entity as the selected company.`,
       type: 'warning',
-      action: 'Confirm that the matched entity above is the correct company before relying on jurisdiction and ownership data. If it is wrong, the ownership score may be inaccurate.',
+      action: 'Confirm that the matched entity above is the correct company before relying on jurisdiction and ownership data.',
     })
   }
 
@@ -437,7 +437,7 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
       action = 'Search at gleif.org to check LEI registration and jurisdiction manually.'
     }
     steps.push({
-      text: `GLEIF data could not be retrieved. ${ERROR_LABELS[cat]} The ownership score is based on available information only.`,
+      text: `GLEIF data could not be retrieved. ${ERROR_LABELS[cat]}`,
       type: 'warning',
       action,
     })
@@ -460,26 +460,32 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
   if (jurisdiction) {
     const jUp = jurisdiction.toUpperCase()
     const jLo = jurisdiction.toLowerCase()
+    let jLabel = jUp
+    try {
+      const name = new Intl.DisplayNames(['en'], { type: 'region' }).of(jUp)
+      if (name && name !== jUp) jLabel = `${name} (${jUp})`
+    } catch { /* use raw code */ }
+
     if (HIGH_JURISDICTIONS.has(jUp)) {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is a high-trust jurisdiction (UK / US / EU / equivalent): score 95.`, type: 'positive' })
+      steps.push({ text: `Jurisdiction: ${jLabel} — a high-trust jurisdiction (UK / US / EU / equivalent).`, type: 'positive' })
     } else if (FATF_BLACK_LIST.some(c => jLo.includes(c.toLowerCase()))) {
       steps.push({
-        text: `Jurisdiction "${jurisdiction}" is on the FATF black list: score 10.`,
+        text: `Jurisdiction: ${jLabel} — on the FATF black list (subject to countermeasures).`,
         type: 'deduction',
-        action: 'Do not proceed without escalating to your compliance team. This jurisdiction is subject to FATF countermeasures.',
+        action: 'Do not proceed without escalating to your compliance team.',
       })
     } else if (FATF_GREY_LIST.some(c => jLo.includes(c.toLowerCase()))) {
       steps.push({
-        text: `Jurisdiction "${jurisdiction}" is on the FATF grey list (enhanced monitoring): score 40.`,
+        text: `Jurisdiction: ${jLabel} — on the FATF grey list (enhanced monitoring).`,
         type: 'warning',
         action: 'Apply enhanced due diligence. Request beneficial ownership documentation and consider senior management approval.',
       })
     } else {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is a FATF member in good standing: score 65.`, type: 'info' })
+      steps.push({ text: `Jurisdiction: ${jLabel} — FATF member in good standing.`, type: 'info' })
     }
   } else {
     steps.push({
-      text: 'Jurisdiction could not be determined — defaulting to score 40.',
+      text: 'Jurisdiction could not be determined.',
       type: 'info',
       action: 'Check the registered address on Companies House to determine the operating jurisdiction.',
     })
@@ -503,41 +509,34 @@ function explainTrustCerts(sd: Record<string, unknown>, score: number): Step[] {
 
   if (status === 'not_found') {
     steps.push({
-      text: 'No trust page found at common locations. Base score: 15.',
+      text: 'No trust page found at common locations.',
       type: 'info',
       action: 'The vendor may host certifications on a custom subdomain or request-only portal. Verify manually or request documentation directly.',
     })
   } else if (status === 'inconclusive') {
     steps.push({
-      text: 'A trust page was found but its certifications could not be read (likely dynamically rendered or access-gated). Score: 30.',
+      text: 'A trust page was found but its certifications could not be read (likely dynamically rendered or access-gated).',
       type: 'warning',
       action: 'Visit the trust page directly or request SOC 2, ISO 27001, or Cyber Essentials documentation from the vendor.',
     })
   } else {
-    // found — additive per cert
-    const CERT_POINTS: Record<string, number> = {
-      SOC2_TYPE_II: 40, SOC2_TYPE_I: 25, ISO_27001: 30, PCI_DSS: 25,
-      CSA_STAR: 20, CYBER_ESSENTIALS_PLUS: 20, ISO_22301: 15, ISO_27701: 15,
-      CYBER_ESSENTIALS: 15, OTHER: 15,
-    }
     if (certs.length === 0) {
       steps.push({
-        text: 'Trust page found but no security certifications were listed. Score: 20.',
+        text: 'Trust page found but no security certifications were listed.',
         type: 'info',
       })
     } else {
       steps.push({
-        text: `${certs.length} security certification${certs.length !== 1 ? 's' : ''} found. Score accumulates per certification.`,
-        type: 'base',
+        text: `${certs.length} security certification${certs.length !== 1 ? 's' : ''} auto-discovered.`,
+        type: 'positive',
       })
       for (const cert of certs) {
-        const pts = CERT_POINTS[cert.certType] ?? 15
         const label = cert.certType === 'OTHER' && cert.notes
           ? `${cert.notes} (mapped to Other)`
           : (CERT_LABELS[cert.certType] ?? cert.certType)
-        steps.push({ text: `${label}: +${pts}`, type: 'positive' })
+        steps.push({ text: label, type: 'positive' })
       }
-      steps.push({ text: `Auto-discovered certs shown above. Analyst confirms which are relevant.`, type: 'info' })
+      steps.push({ text: 'Auto-discovered certifications are unverified — confirm against actual reports before relying on them.', type: 'info' })
     }
   }
 
@@ -555,7 +554,7 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
 
   if (status === 'not_checked') {
     steps.push({
-      text: `No risk-relevant headlines identified. A neutral-positive score has been applied.${articlesCount != null && articlesCount > 0 ? ` (${articlesCount} articles retrieved)` : ''}`,
+      text: `No risk-relevant headlines identified.${articlesCount != null && articlesCount > 0 ? ` (${articlesCount} articles retrieved)` : ''}`,
       type: 'info',
       action: 'Search Google News or industry trade press manually for recent coverage of this vendor.',
     })
@@ -566,20 +565,19 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
   if (status === 'summary_unavailable') {
     const count = articlesCount ?? 0
     steps.push({
-      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable. A neutral-positive score of 80 was applied.`,
+      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable.`,
       type: 'info',
-      action: 'Review the news headlines manually and re-run the assessment if you need an AI sentiment score.',
+      action: 'Review the news headlines manually and re-run the assessment if you need an AI sentiment analysis.',
     })
     if (queryNote) steps.push({ text: queryNote, type: 'info' })
     return steps
   }
 
-  const sentimentScores: Record<string, number> = { positive: 90, neutral: 80, mixed: 50, negative: 20 }
   if (sentiment) {
     const t: StepType = sentiment === 'negative' ? 'deduction' : sentiment === 'positive' ? 'positive' : 'info'
     const count = articlesCount != null ? ` (${articlesCount} article${articlesCount !== 1 ? 's' : ''} analysed)` : ''
     steps.push({
-      text: `AI assessed overall news sentiment as "${sentiment}"${count}: score ${sentimentScores[sentiment] ?? 70}.`,
+      text: `AI assessed overall news sentiment as "${sentiment}"${count}.`,
       type: t,
     })
   }
@@ -958,7 +956,7 @@ export default function DimensionCard({
         <div className="border-t border-[#E2DFF0] px-5 py-5 space-y-5">
 
           {/* ── Band confirm/override (new assessments) ──────────────────── */}
-          {isBandMode && suggestedBand !== 'Not assessed' && (
+          {isBandMode && (
             <div className="space-y-3">
               {/* Confirmation state banner */}
               {isConfirmed ? (
@@ -966,9 +964,11 @@ export default function DimensionCard({
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-0.5">
                       <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B5478] font-medium">
-                        {isOverridden ? 'Band overridden by analyst' : 'Band confirmed by analyst'}
+                        {suggestedBand === 'Not assessed'
+                          ? 'Band set by analyst (Fides had no data)'
+                          : isOverridden ? 'Band overridden by analyst' : 'Band confirmed by analyst'}
                       </p>
-                      {isOverridden && suggestedBand && (
+                      {isOverridden && suggestedBand && suggestedBand !== 'Not assessed' && (
                         <p className="text-[12px] text-[#5B5478]">
                           Fides suggested: <span className="font-medium">{suggestedBand}</span>
                           {' → '}
@@ -985,7 +985,7 @@ export default function DimensionCard({
                     {canOverride && bandActionOpen === null && (
                       <button
                         onClick={() => {
-                          setSelectedBand((confirmedBand as TrustBandOption) ?? (suggestedBand as TrustBandOption) ?? 'High')
+                          setSelectedBand((confirmedBand as TrustBandOption) ?? 'High')
                           setBandNote('')
                           setBandActionOpen('override')
                           setBandError(null)
@@ -1000,29 +1000,35 @@ export default function DimensionCard({
               ) : (
                 canOverride && bandActionOpen === null && (
                   <div className="flex items-center justify-between">
-                    <p className="text-[12px] text-[#8B85A8]">Fides suggests: <span className="font-medium text-[#1A1625]">{suggestedBand}</span></p>
+                    {suggestedBand === 'Not assessed' ? (
+                      <p className="text-[12px] text-[#8B85A8]">Fides had no data for this dimension — you can set a band based on your own check.</p>
+                    ) : (
+                      <p className="text-[12px] text-[#8B85A8]">Fides suggests: <span className="font-medium text-[#1A1625]">{suggestedBand}</span></p>
+                    )}
                     <div className="flex gap-2">
+                      {suggestedBand !== 'Not assessed' && (
+                        <button
+                          onClick={() => {
+                            setSelectedBand((suggestedBand as TrustBandOption) ?? 'High')
+                            setBandNote('')
+                            setBandActionOpen('confirm')
+                            setBandError(null)
+                          }}
+                          className="text-[13px] font-medium text-white bg-[#27500A] hover:bg-[#1e3b07] px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          Confirm
+                        </button>
+                      )}
                       <button
                         onClick={() => {
-                          setSelectedBand((suggestedBand as TrustBandOption) ?? 'High')
-                          setBandNote('')
-                          setBandActionOpen('confirm')
-                          setBandError(null)
-                        }}
-                        className="text-[13px] font-medium text-white bg-[#27500A] hover:bg-[#1e3b07] px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelectedBand((suggestedBand as TrustBandOption) ?? 'High')
+                          setSelectedBand('High')
                           setBandNote('')
                           setBandActionOpen('override')
                           setBandError(null)
                         }}
                         className="text-[13px] font-medium text-[#5B3FD4] hover:text-[#3C3489] border border-[#E2DFF0] bg-white hover:bg-[#F9F8FD] px-3 py-1.5 rounded-lg transition-colors"
                       >
-                        Override
+                        {suggestedBand === 'Not assessed' ? 'Set band' : 'Override'}
                       </button>
                     </div>
                   </div>
@@ -1033,7 +1039,7 @@ export default function DimensionCard({
               {bandActionOpen !== null && (
                 <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3">
                   <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
-                    {bandActionOpen === 'confirm' ? 'Confirm band' : 'Override band'}
+                    {bandActionOpen === 'confirm' ? 'Confirm band' : suggestedBand === 'Not assessed' ? 'Set band' : 'Override band'}
                   </p>
                   <div className="flex items-center gap-3">
                     <label className="text-[12px] text-[#5B5478] w-24 flex-shrink-0">Band</label>
@@ -1049,13 +1055,17 @@ export default function DimensionCard({
                   </div>
                   <div>
                     <label className="text-[12px] text-[#5B5478] block mb-1">
-                      Note{selectedBand !== suggestedBand ? ' (required when overriding, min 10 chars)' : ' (optional)'}
+                      {suggestedBand === 'Not assessed'
+                        ? 'Note (required — document how you verified this, min 10 chars)'
+                        : selectedBand !== suggestedBand ? 'Note (required when overriding, min 10 chars)' : 'Note (optional)'}
                     </label>
                     <textarea
                       rows={2}
                       value={bandNote}
                       onChange={e => setBandNote(e.target.value)}
-                      placeholder={selectedBand !== suggestedBand
+                      placeholder={suggestedBand === 'Not assessed'
+                        ? 'Describe how you verified this (e.g. checked haveibeenpwned.com manually — no breaches found)…'
+                        : selectedBand !== suggestedBand
                         ? 'Explain why you are changing the suggested band…'
                         : 'Optional note…'
                       }
@@ -1069,7 +1079,7 @@ export default function DimensionCard({
                       disabled={bandSaving}
                       className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
                     >
-                      {bandSaving ? 'Saving…' : bandActionOpen === 'confirm' ? 'Confirm' : 'Save override'}
+                      {bandSaving ? 'Saving…' : bandActionOpen === 'confirm' ? 'Confirm' : suggestedBand === 'Not assessed' ? 'Set band' : 'Save override'}
                     </button>
                     <button
                       onClick={() => { setBandActionOpen(null); setBandError(null); setBandNote('') }}
