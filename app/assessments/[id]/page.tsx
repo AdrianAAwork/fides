@@ -161,6 +161,7 @@ export default async function AssessmentDetailPage({
       notes: certifications.notes,
       sourceType: certifications.sourceType,
       verifiedBy: certifications.verifiedBy,
+      isRelevant: certifications.isRelevant,
     })
     .from(certifications)
     .where(and(

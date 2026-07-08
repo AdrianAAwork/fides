@@ -206,6 +206,7 @@ export const certifications = pgTable('certifications', {
   notes: text('notes'),
   createdBy: uuid('created_by').references(() => users.id),
   verifiedBy: uuid('verified_by').references(() => users.id),
+  isRelevant: boolean('is_relevant').notNull().default(true),
   retrievedAt: timestamp('retrieved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

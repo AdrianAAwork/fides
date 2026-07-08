@@ -17,6 +17,7 @@ export interface CertRow {
   notes: string | null
   sourceType: string         // 'MANUAL' | 'AUTO_VANTA' | 'AUTO_SAFEBASE' | 'AUTO_WEB'
   verifiedBy: string | null  // null = auto-discovered, unverified
+  isRelevant: boolean
 }
 
 interface Props {
@@ -700,6 +701,8 @@ export default function DimensionCard({
   const [verifyCertForm, setVerifyCertForm] = useState<CertForm>(EMPTY_CERT_FORM)
   const [verifySaving, setVerifySaving] = useState(false)
   const [verifyError, setVerifyError] = useState<string | null>(null)
+  // Optimistic relevance state — keyed by cert id
+  const [relevanceOverrides, setRelevanceOverrides] = useState<Record<string, boolean>>({})
 
   async function handleBandSave() {
     const isOverride = selectedBand !== suggestedBand
@@ -845,6 +848,18 @@ export default function DimensionCard({
     }
   }
 
+  async function handleRelevanceToggle(certId: string, newValue: boolean) {
+    setRelevanceOverrides(prev => ({ ...prev, [certId]: newValue }))
+    await fetch(`/api/assessments/${assessmentId}/certifications/${certId}/relevance`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isRelevant: newValue }),
+    }).catch(() => {
+      // Revert on failure
+      setRelevanceOverrides(prev => ({ ...prev, [certId]: !newValue }))
+    })
+  }
+
   const sd      = sourceData ?? {}
   const source  = SOURCE_LABELS[dimension] ?? 'Unknown'
   const fetched = fetchedAt ? new Date(fetchedAt).toLocaleString('en-GB') : null
@@ -860,6 +875,10 @@ export default function DimensionCard({
     if (/EU.US DPF|UK.DPF|SWISS.US DPF|\bCBPR\b|\bPRP\b/.test(label)) return 'privacy_framework'
     if (/NIST\s*CSF/.test(label)) return 'other'
     return 'security_cert'
+  }
+
+  function certRelevant(cert: CertRow): boolean {
+    return relevanceOverrides[cert.id] ?? cert.isRelevant
   }
 
   const autoCerts = certifications.filter(c => c.sourceType !== 'MANUAL')
@@ -1404,26 +1423,37 @@ export default function DimensionCard({
                                     </a>
                                   )}
                                 </div>
-                                {canOverride && verifyCertId !== cert.id && (
-                                  <button
-                                    onClick={() => {
-                                      setVerifyCertId(cert.id)
-                                      setVerifyCertForm({
-                                        certType: cert.certType,
-                                        issuingBody: cert.issuingBody ?? '',
-                                        auditPeriodStart: '',
-                                        auditPeriodEnd: '',
-                                        expiryDate: '',
-                                        sourceUrl: cert.sourceUrl ?? '',
-                                        notes: cert.certType === 'OTHER' ? '' : (cert.notes ?? ''),
-                                      })
-                                      setVerifyError(null)
-                                    }}
-                                    className="flex-shrink-0 text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
-                                  >
-                                    Verify
-                                  </button>
-                                )}
+                                <div className="flex-shrink-0 flex items-center gap-3">
+                                  <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Include in report">
+                                    <input
+                                      type="checkbox"
+                                      checked={certRelevant(cert)}
+                                      onChange={e => handleRelevanceToggle(cert.id, e.target.checked)}
+                                      className="w-3.5 h-3.5 rounded accent-[#5B3FD4] cursor-pointer"
+                                    />
+                                    <span className="text-[11px] text-[#8B85A8]">Include in report</span>
+                                  </label>
+                                  {canOverride && verifyCertId !== cert.id && (
+                                    <button
+                                      onClick={() => {
+                                        setVerifyCertId(cert.id)
+                                        setVerifyCertForm({
+                                          certType: cert.certType,
+                                          issuingBody: cert.issuingBody ?? '',
+                                          auditPeriodStart: '',
+                                          auditPeriodEnd: '',
+                                          expiryDate: '',
+                                          sourceUrl: cert.sourceUrl ?? '',
+                                          notes: cert.certType === 'OTHER' ? '' : (cert.notes ?? ''),
+                                        })
+                                        setVerifyError(null)
+                                      }}
+                                      className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                                    >
+                                      Verify
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
@@ -1688,35 +1718,46 @@ export default function DimensionCard({
                               <p className="text-[12px] text-[#8B85A8]">{cert.notes}</p>
                             )}
                           </div>
-                          {canOverride && (
-                            <div className="flex-shrink-0">
-                              {certDeleteId === cert.id ? (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[12px] text-[#5B5478]">Remove?</span>
+                          <div className="flex-shrink-0 flex items-center gap-3">
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Include in report">
+                              <input
+                                type="checkbox"
+                                checked={certRelevant(cert)}
+                                onChange={e => handleRelevanceToggle(cert.id, e.target.checked)}
+                                className="w-3.5 h-3.5 rounded accent-[#5B3FD4] cursor-pointer"
+                              />
+                              <span className="text-[11px] text-[#8B85A8]">Include in report</span>
+                            </label>
+                            {canOverride && (
+                              <>
+                                {certDeleteId === cert.id ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[12px] text-[#5B5478]">Remove?</span>
+                                    <button
+                                      onClick={() => handleCertDelete(cert.id)}
+                                      disabled={certDeleting}
+                                      className="text-[12px] text-[#791F1F] font-medium hover:text-[#A32D2D] disabled:opacity-50"
+                                    >
+                                      {certDeleting ? 'Removing…' : 'Yes'}
+                                    </button>
+                                    <button
+                                      onClick={() => setCertDeleteId(null)}
+                                      className="text-[12px] text-[#8B85A8] hover:text-[#5B5478]"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
                                   <button
-                                    onClick={() => handleCertDelete(cert.id)}
-                                    disabled={certDeleting}
-                                    className="text-[12px] text-[#791F1F] font-medium hover:text-[#A32D2D] disabled:opacity-50"
+                                    onClick={() => { setCertDeleteId(cert.id); setCertError(null) }}
+                                    className="text-[12px] text-[#B8B3CE] hover:text-[#791F1F] transition-colors"
                                   >
-                                    {certDeleting ? 'Removing…' : 'Yes'}
+                                    Remove
                                   </button>
-                                  <button
-                                    onClick={() => setCertDeleteId(null)}
-                                    className="text-[12px] text-[#8B85A8] hover:text-[#5B5478]"
-                                  >
-                                    No
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => { setCertDeleteId(cert.id); setCertError(null) }}
-                                  className="text-[12px] text-[#B8B3CE] hover:text-[#791F1F] transition-colors"
-                                >
-                                  Remove
-                                </button>
-                              )}
-                            </div>
-                          )}
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )
