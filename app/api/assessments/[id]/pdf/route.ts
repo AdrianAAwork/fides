@@ -62,7 +62,15 @@ export async function GET(
     .limit(1)
 
   const scores = await db
-    .select()
+    .select({
+      dimension: assessmentScores.dimension,
+      rawScore: assessmentScores.rawScore,
+      finalScore: assessmentScores.finalScore,
+      isOverridden: assessmentScores.isOverridden,
+      overrideReason: assessmentScores.overrideReason,
+      suggestedBand: assessmentScores.suggestedBand,
+      confirmedBand: assessmentScores.confirmedBand,
+    })
     .from(assessmentScores)
     .where(eq(assessmentScores.assessmentId, id))
 
@@ -81,7 +89,7 @@ export async function GET(
       notes: certifications.notes,
     })
     .from(certifications)
-    .where(and(eq(certifications.assessmentId, id), isNull(certifications.deletedAt)))
+    .where(and(eq(certifications.assessmentId, id), isNull(certifications.deletedAt), eq(certifications.isRelevant, true)))
 
   const auditEntries = await db
     .select({
@@ -112,6 +120,8 @@ export async function GET(
         finalScore: s.finalScore,
         isOverridden: s.isOverridden,
         overrideReason: s.overrideReason,
+        suggestedBand: s.suggestedBand ?? null,
+        confirmedBand: s.confirmedBand ?? null,
       }
     })
     .filter((s): s is PdfScore => s !== null)
@@ -136,6 +146,7 @@ export async function GET(
       incorporationDate: assessment.incorporationDate,
       riskTier: assessment.riskTier ?? 'MEDIUM',
       overallScore: assessment.overallScore ?? 0,
+      overallBand: assessment.confirmedOverallBand ?? assessment.suggestedOverallBand ?? null,
       createdAt: assessment.createdAt,
     },
     assessorName: assessor?.displayName ?? null,

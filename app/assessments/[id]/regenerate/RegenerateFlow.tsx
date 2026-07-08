@@ -11,6 +11,7 @@ interface PipelineEvent {
   assessmentId?: string
   riskTier?: string
   overallScore?: number
+  suggestedOverallBand?: string
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -42,7 +43,7 @@ export default function RegenerateFlow({ previousAssessmentId, vendorName }: Pro
   const router = useRouter()
   const [pipelineSteps, setPipelineSteps] = useState<Map<string, PipelineEvent>>(new Map())
   const [flowState, setFlowState] = useState<'running' | 'complete' | 'error'>('running')
-  const [completed, setCompleted] = useState<{ id: string; riskTier: string; overallScore: number } | null>(null)
+  const [completed, setCompleted] = useState<{ id: string; riskTier: string; overallScore: number; suggestedOverallBand?: string } | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const started = useRef(false)
 
@@ -83,7 +84,7 @@ export default function RegenerateFlow({ previousAssessmentId, vendorName }: Pro
               if (event.type === 'step' && event.step) {
                 setPipelineSteps((prev) => new Map(prev).set(event.step!, event))
               } else if (event.type === 'complete') {
-                setCompleted({ id: event.assessmentId!, riskTier: event.riskTier!, overallScore: event.overallScore! })
+                setCompleted({ id: event.assessmentId!, riskTier: event.riskTier!, overallScore: event.overallScore!, suggestedOverallBand: event.suggestedOverallBand })
                 setFlowState('complete')
               } else if (event.type === 'error') {
                 setErrorMsg(event.message ?? 'Unknown error')
@@ -118,7 +119,10 @@ export default function RegenerateFlow({ previousAssessmentId, vendorName }: Pro
           <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${TIER_COLORS[completed.riskTier] ?? 'bg-gray-100 text-gray-700'}`}>
             {completed.riskTier}
           </span>
-          <span className="text-sm text-gray-400">Score: {completed.overallScore}/100</span>
+          {completed.suggestedOverallBand
+            ? <span className="text-sm text-gray-400">{completed.suggestedOverallBand} (pending analyst confirmation)</span>
+            : <span className="text-sm text-gray-400">Score: {completed.overallScore}/100</span>
+          }
         </div>
         <div className="flex items-center justify-center gap-3 pt-1">
           <button

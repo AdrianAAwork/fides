@@ -58,6 +58,9 @@ export async function POST(req: Request) {
   const companiesHouseNumber =
     typeof body.companiesHouseNumber === 'string' ? body.companiesHouseNumber.trim() : undefined
 
+  const vendorDomain =
+    typeof body.vendorDomain === 'string' ? body.vendorDomain.trim().slice(0, 253) : undefined
+
   // Rate limiting — check and increment the per-user daily counter
   const today = new Date().toISOString().split('T')[0]
 
@@ -95,6 +98,7 @@ export async function POST(req: Request) {
           companiesHouseNumber,
           orgId: ctx.org.id,
           userId: ctx.user.id,
+          vendorDomain,
         })
 
         for await (const event of pipeline) {

@@ -42,12 +42,32 @@ export async function fetchCompaniesHouseProfile(
     // Extract website from registered data
     const website = (p.website as string | undefined) ?? undefined
 
+    // Log raw jurisdiction-related fields so we can see exactly what CH returns for
+    // FC/overseas companies. For FC companies the top-level `jurisdiction` is the UK
+    // registration domain; the home country is expected to be in foreign_company_details.
+    const fcd = p.foreign_company_details as Record<string, unknown> | undefined
+    console.log('[pipeline:ch] raw jurisdiction fields for', companyNumber, JSON.stringify({
+      type: p.type,
+      jurisdiction: p.jurisdiction,
+      registered_office_country: (p.registered_office_address as Record<string, string> | undefined)?.country,
+      foreign_company_details: fcd,
+    }))
+
+    // For FC/overseas companies, the home country sits in foreign_company_details.
+    // Prefer that over the top-level jurisdiction (which is the UK registration domain).
+    const foreignOriginatingCountry =
+      (fcd?.originating_registry as Record<string, unknown> | undefined)?.country as string | undefined
+    const foreignGovernedBy = fcd?.governed_by as string | undefined
+
     return {
       company_name: (p.company_name as string) ?? '',
       company_number: (p.company_number as string) ?? companyNumber,
       company_status: (p.company_status as string) ?? 'unknown',
       date_of_creation: p.date_of_creation as string | undefined,
       registered_office_address: p.registered_office_address as Record<string, string> | undefined,
+      jurisdiction: p.jurisdiction as string | undefined,
+      foreignOriginatingCountry,
+      foreignGoverningLaw: foreignGovernedBy,
       sic_codes: p.sic_codes as string[] | undefined,
       type: p.type as string | undefined,
       accounts: p.accounts as { next_due?: string; overdue?: boolean } | undefined,

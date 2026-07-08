@@ -60,6 +60,8 @@ export interface PdfScore {
   finalScore: number
   isOverridden: boolean
   overrideReason: string | null
+  suggestedBand: string | null
+  confirmedBand: string | null
 }
 
 export interface AssessmentPdfData {
@@ -74,6 +76,7 @@ export interface AssessmentPdfData {
     incorporationDate: string | null
     riskTier: string
     overallScore: number
+    overallBand: string | null
     createdAt: Date
   }
   assessorName: string | null
@@ -102,7 +105,6 @@ const CERT_LABELS: Record<string, string> = {
   CYBER_ESSENTIALS_PLUS: 'Cyber Essentials Plus',
   PCI_DSS: 'PCI DSS',
   CSA_STAR: 'CSA STAR',
-  OTHER: 'Other certification',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -115,6 +117,7 @@ const SOURCE_LABELS: Record<string, string> = {
 const ACTION_LABELS: Record<string, string> = {
   ASSESSMENT_CREATED: 'Assessment created',
   SCORE_OVERRIDDEN: 'Score adjusted',
+  BAND_CONFIRMED: 'Band confirmed',
   CLASSIFICATION_CONFIRMED: 'DORA classification confirmed',
   CLASSIFICATION_OVERRIDDEN: 'DORA classification overridden',
   CERT_ADDED: 'Certification added',
@@ -124,18 +127,29 @@ const ACTION_LABELS: Record<string, string> = {
   ASSESSMENT_DELETED: 'Assessment deleted',
 }
 
-const TIER_BG: Record<string, string> = {
-  LOW: '#E6F1FB',
-  MEDIUM: '#EAF3DE',
-  HIGH: '#FAEEDA',
-  CRITICAL: '#FCEBEB',
+// Band colours (PDF-safe solid colours only — no rgba/opacity)
+const BAND_BG: Record<string, string> = {
+  'High':         '#EAF3DE',
+  'Medium':       '#FAEEDA',
+  'Low':          '#FCEBEB',
+  'Needs review': '#EEEDFE',
+  'Not assessed': '#F4F3F8',
 }
 
-const TIER_TEXT: Record<string, string> = {
-  LOW: '#0C447C',
-  MEDIUM: '#27500A',
-  HIGH: '#633806',
-  CRITICAL: '#791F1F',
+const BAND_TEXT: Record<string, string> = {
+  'High':         '#27500A',
+  'Medium':       '#633806',
+  'Low':          '#791F1F',
+  'Needs review': '#3C3489',
+  'Not assessed': '#5B5478',
+}
+
+function bandBg(band: string | null): string {
+  return BAND_BG[band ?? 'Not assessed'] ?? '#F4F3F8'
+}
+
+function bandText(band: string | null): string {
+  return BAND_TEXT[band ?? 'Not assessed'] ?? '#5B5478'
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -221,10 +235,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     color: SECONDARY,
   },
-  tierBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 50,
+  bandBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 3,
     alignSelf: 'flex-start',
   },
   amber: {
@@ -274,31 +288,37 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+function BandBadge({ band }: { band: string | null }) {
+  const display = band ?? 'Not assessed'
+  return (
+    <View style={[styles.bandBadge, { backgroundColor: bandBg(band) }]}>
+      <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: bandText(band) }}>
+        {display}
+      </Text>
+    </View>
+  )
+}
+
 function PdfSeal({ size = 100 }: { size?: number }) {
-  // Fixed coordinate space: outer r=50, inner r=38, centred at (50,50).
-  // `size` scales the rendered dimensions; 100 = 1:1 with the viewBox.
   const scale = size / 100
   const subFontSize = Math.max(5, Math.round(7 * scale))
   return (
     <View style={{ alignItems: 'center' }}>
-      {/* Ring container — Svg in normal flow, text overlay absolutely positioned on top */}
       <View style={{ width: size, height: size, position: 'relative' }}>
         <Svg width={size} height={size} viewBox="0 0 100 100">
           <Circle cx={50} cy={50} r={50} stroke={PURPLE} strokeWidth={1.5} fill="none" strokeOpacity={0.45} />
           <Circle cx={50} cy={50} r={38} stroke={PURPLE} strokeWidth={1} fill="none" strokeOpacity={0.3} />
         </Svg>
-        {/* "F" (large serif) + "FIDES" (tracked caps) centred inside the rings */}
         <View style={{ position: 'absolute', top: 0, left: 0, width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontFamily: 'Times-Roman', fontSize: Math.round(38 * scale), color: PURPLE, lineHeight: 1 }}>F</Text>
           <Text style={{ fontSize: subFontSize, color: PURPLE, letterSpacing: 2, marginTop: 2 }}>FIDES</Text>
         </View>
       </View>
-      {/* Subtitle lines below the outer circle */}
       <Text style={{ fontSize: subFontSize, color: PURPLE, letterSpacing: 1.5, opacity: 0.8, marginTop: 3, textAlign: 'center' }}>
         VENDOR ASSESSMENT
       </Text>
       <Text style={{ fontSize: subFontSize, color: PURPLE, letterSpacing: 1.5, opacity: 0.65, marginTop: 1, textAlign: 'center' }}>
-        RISK MANAGEMENT
+        TRUST & COMPLIANCE
       </Text>
     </View>
   )
@@ -332,38 +352,54 @@ function buildAuditDesc(entry: PdfAuditEntry): string {
     if (entry.reason) parts.push(entry.reason)
     return parts.filter(Boolean).join(' · ')
   }
+  if (entry.actionType === 'BAND_CONFIRMED') {
+    const dim = (newVal?.dimension as string) ?? ''
+    const band = (newVal?.confirmedBand as string) ?? ''
+    return [dim.replace(/_/g, ' ').toLowerCase(), band].filter(Boolean).join(' · ')
+  }
   if (entry.actionType === 'CERT_ADDED') {
     return ((newVal?.certType as string) ?? '').replace(/_/g, ' ')
   }
   return entry.reason ?? ''
 }
 
+// Cert label — for OTHER certs, use notes as the display name (matches app UI)
+function certLabel(cert: PdfCert): string {
+  if (cert.certType !== 'OTHER') return CERT_LABELS[cert.certType] ?? cert.certType
+  return cert.notes ?? 'Other certification'
+}
+
+// Cert category — mirrors DimensionCard.getCertCategory
+function certCategory(cert: PdfCert): 'security' | 'regulatory' | 'other' {
+  if (cert.certType !== 'OTHER') return 'security'
+  const label = (cert.notes ?? '').toUpperCase()
+  if (/\bDORA\b/.test(label) || /\bGDPR\b/.test(label) || /\bCCPA\b/.test(label)) return 'regulatory'
+  if (/EU.US DPF|UK.DPF|SWISS.US DPF|\bCBPR\b|\bPRP\b/.test(label)) return 'regulatory'
+  if (/NIST\s*CSF/.test(label)) return 'other'
+  return 'security'
+}
+
 // ── Pages ─────────────────────────────────────────────────────────────────────
 
 function CoverPage({ data }: { data: AssessmentPdfData }) {
   const { assessment, orgName, assessorName } = data
-  const tierBg = TIER_BG[assessment.riskTier] ?? '#F4F3F8'
-  const tierText = TIER_TEXT[assessment.riskTier] ?? BODY
+  const overallBand = assessment.overallBand
 
   return (
     <Page size="A4" style={styles.page}>
       <PdfPageNumber />
-      {/* Seal centred */}
       <View style={{ alignItems: 'center', marginTop: 60, marginBottom: 32 }}>
         <PdfSeal size={120} />
       </View>
 
-      {/* Title */}
       <Text style={{ fontSize: 13, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', letterSpacing: 2, color: BODY, textAlign: 'center', marginBottom: 8 }}>
-        Vendor Risk Assessment Report
+        Vendor Trust Assessment Report
       </Text>
 
-      {/* Vendor name */}
       <Text style={{ fontSize: 22, fontFamily: 'Helvetica-Bold', color: BODY, textAlign: 'center', marginBottom: 24 }}>
         {assessment.vendorName}
       </Text>
 
-      {/* Meta */}
       <View style={{ backgroundColor: '#F9F8FD', borderRadius: 4, padding: 16, marginBottom: 20, marginHorizontal: 40 }}>
         <MetaRow label="Assessment date" value={fmtDate(assessment.createdAt)} />
         <MetaRow label="Assessed by" value={assessorName ?? 'Unknown'} />
@@ -373,19 +409,18 @@ function CoverPage({ data }: { data: AssessmentPdfData }) {
         )}
       </View>
 
-      {/* Risk tier badge */}
+      {/* Overall trust band */}
       <View style={{ alignItems: 'center', marginBottom: 24 }}>
-        <View style={[styles.tierBadge, { backgroundColor: tierBg }]}>
-          <Text style={{ fontSize: 13, fontFamily: 'Helvetica-Bold', color: tierText, letterSpacing: 1 }}>
-            {assessment.riskTier} RISK
+        <Text style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, color: SECONDARY, marginBottom: 6 }}>
+          Overall trust
+        </Text>
+        <View style={[styles.bandBadge, { backgroundColor: bandBg(overallBand), paddingHorizontal: 16, paddingVertical: 8 }]}>
+          <Text style={{ fontSize: 16, fontFamily: 'Helvetica-Bold', color: bandText(overallBand) }}>
+            {overallBand ?? 'Not assessed'}
           </Text>
         </View>
-        <Text style={{ fontSize: 10, color: SECONDARY, marginTop: 4 }}>
-          Overall score: {assessment.overallScore}/100
-        </Text>
       </View>
 
-      {/* Confidentiality notice */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: '#E2DFF0', paddingTop: 12, marginTop: 'auto' }}>
         <Text style={{ fontSize: 8, color: SECONDARY, textAlign: 'center' }}>
           For internal use only — prepared by {orgName} using Fides
@@ -406,7 +441,6 @@ function ExecutiveSummaryPage({ data }: { data: AssessmentPdfData }) {
       <PdfPageNumber />
       <SectionHeader>Executive Summary</SectionHeader>
 
-      {/* Report metadata table */}
       <View style={{ marginBottom: 12 }}>
         <MetaRow label="CH number" value={assessment.companiesHouseNumber ?? '—'} />
         <MetaRow label="LEI" value={assessment.lei ?? '—'} />
@@ -452,59 +486,79 @@ function ExecutiveSummaryPage({ data }: { data: AssessmentPdfData }) {
   )
 }
 
-function ScoresPage({ data }: { data: AssessmentPdfData }) {
+function BandsPage({ data }: { data: AssessmentPdfData }) {
   const { scores, assessment } = data
+  const isBandMode = scores.some(s => s.suggestedBand != null)
 
   return (
     <Page size="A4" style={styles.page}>
       <PdfPageNumber />
-      <SectionHeader>Risk Dimension Scores</SectionHeader>
+      <SectionHeader>Trust Band Assessment</SectionHeader>
 
-      {/* Table header */}
-      <View style={styles.tableHeader}>
-        <Text style={[styles.tableCellHeader, { width: '35%' }]}>Dimension</Text>
-        <Text style={[styles.tableCellHeader, { width: '12%', textAlign: 'right' }]}>Weight</Text>
-        <Text style={[styles.tableCellHeader, { width: '13%', textAlign: 'right' }]}>Raw</Text>
-        <Text style={[styles.tableCellHeader, { width: '13%', textAlign: 'right' }]}>Final</Text>
-        <Text style={[styles.tableCellHeader, { width: '27%' }]}>Notes</Text>
+      {/* Overall band summary */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 10 }}>
+        <Text style={{ fontSize: 10, color: SECONDARY }}>Overall trust:</Text>
+        <BandBadge band={assessment.overallBand} />
       </View>
 
-      {scores.map((score) => (
-        <View key={score.dimension} style={styles.tableRow}>
-          <Text style={[styles.tableCell, { width: '35%' }]}>{score.label}</Text>
-          <Text style={[styles.tableCell, { width: '12%', textAlign: 'right', color: SECONDARY }]}>{score.weight}%</Text>
-          <Text style={[styles.tableCell, { width: '13%', textAlign: 'right' }]}>{score.rawScore}</Text>
-          <Text style={[styles.tableCell, { width: '13%', textAlign: 'right', fontFamily: score.isOverridden ? 'Helvetica-Bold' : 'Helvetica', color: score.isOverridden ? PURPLE : BODY }]}>{score.finalScore}</Text>
-          <Text style={[styles.tableCell, { width: '27%', color: SECONDARY, fontSize: 8 }]}>{score.isOverridden ? 'Manually adjusted' : ''}</Text>
-        </View>
-      ))}
-
-      {/* Overall */}
-      <View style={[styles.tableRow, { backgroundColor: '#F4F3F8', borderTopWidth: 1, borderTopColor: PURPLE }]}>
-        <Text style={[styles.tableCell, { width: '35%', fontFamily: 'Helvetica-Bold' }]}>Overall weighted score</Text>
-        <Text style={[styles.tableCell, { width: '12%' }]} />
-        <Text style={[styles.tableCell, { width: '13%' }]} />
-        <Text style={[styles.tableCell, { width: '13%', textAlign: 'right', fontFamily: 'Helvetica-Bold' }]}>{assessment.overallScore}</Text>
-        <View style={[styles.tierBadge, { width: '27%', backgroundColor: TIER_BG[assessment.riskTier] ?? '#F4F3F8', paddingVertical: 2, paddingHorizontal: 4 }]}>
-          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: TIER_TEXT[assessment.riskTier] ?? BODY }}>
-            {assessment.riskTier}
-          </Text>
-        </View>
-      </View>
-
-      {/* Override notes */}
-      {scores.some(s => s.isOverridden && s.overrideReason) && (
+      {isBandMode ? (
         <>
-          <SectionHeader>Score Adjustment Notes</SectionHeader>
-          {scores.filter(s => s.isOverridden && s.overrideReason).map(s => (
-            <View key={s.dimension} style={{ marginBottom: 8 }}>
-              <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: BODY, marginBottom: 2 }}>
-                {s.label}
-              </Text>
-              <Text style={{ fontSize: 9, color: SECONDARY }}>{s.overrideReason}</Text>
-            </View>
-          ))}
+          {/* Band table */}
+          <View style={styles.tableHeader}>
+            <Text style={[styles.tableCellHeader, { width: '32%' }]}>Dimension</Text>
+            <Text style={[styles.tableCellHeader, { width: '24%' }]}>Fides suggested</Text>
+            <Text style={[styles.tableCellHeader, { width: '24%' }]}>Analyst confirmed</Text>
+            <Text style={[styles.tableCellHeader, { width: '20%' }]}>Notes</Text>
+          </View>
+
+          {scores.map((score) => {
+            const displayBand = score.confirmedBand ?? score.suggestedBand
+            const isAnalystSet = score.confirmedBand != null
+            return (
+              <View key={score.dimension} style={styles.tableRow}>
+                <Text style={[styles.tableCell, { width: '32%' }]}>{score.label}</Text>
+                <View style={{ width: '24%' }}>
+                  {score.suggestedBand ? (
+                    <BandBadge band={score.suggestedBand} />
+                  ) : (
+                    <Text style={[styles.tableCell, { color: SECONDARY }]}>—</Text>
+                  )}
+                </View>
+                <View style={{ width: '24%' }}>
+                  {isAnalystSet ? (
+                    <BandBadge band={score.confirmedBand} />
+                  ) : (
+                    <Text style={[styles.tableCell, { color: SECONDARY, fontSize: 8 }]}>
+                      {displayBand ?? '—'}
+                    </Text>
+                  )}
+                </View>
+                <Text style={[styles.tableCell, { width: '20%', color: SECONDARY, fontSize: 8 }]}>
+                  {score.overrideReason ?? (isAnalystSet && score.confirmedBand !== score.suggestedBand ? 'Analyst override' : '')}
+                </Text>
+              </View>
+            )
+          })}
+
+          {/* Analyst notes */}
+          {scores.some(s => s.isOverridden && s.overrideReason) && (
+            <>
+              <SectionHeader>Analyst Notes</SectionHeader>
+              {scores.filter(s => s.isOverridden && s.overrideReason).map(s => (
+                <View key={s.dimension} style={{ marginBottom: 8 }}>
+                  <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: BODY, marginBottom: 2 }}>
+                    {s.label}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: SECONDARY }}>{s.overrideReason}</Text>
+                </View>
+              ))}
+            </>
+          )}
         </>
+      ) : (
+        <Text style={{ fontSize: 10, color: SECONDARY }}>
+          Trust band assessment not yet completed for this assessment.
+        </Text>
       )}
     </Page>
   )
@@ -538,9 +592,8 @@ function DoraPage({ data }: { data: AssessmentPdfData }) {
       <PdfPageNumber />
       <SectionHeader>DORA / FCA Classification</SectionHeader>
 
-      {/* Classification badge */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-        <View style={[styles.tierBadge, { backgroundColor: clsBg }]}>
+        <View style={[styles.bandBadge, { backgroundColor: clsBg }]}>
           <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: clsText }}>{dora.classification}</Text>
         </View>
         {dora.isOverridden && (
@@ -583,64 +636,82 @@ function DoraPage({ data }: { data: AssessmentPdfData }) {
   )
 }
 
+function CertGroup({ title, certs, isManual }: { title: string; certs: PdfCert[]; isManual?: boolean }) {
+  if (certs.length === 0) return null
+  return (
+    <>
+      <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: BODY, marginTop: 10, marginBottom: 4 }}>{title}</Text>
+      <View style={styles.tableHeader}>
+        <Text style={[styles.tableCellHeader, { width: '32%' }]}>Certification</Text>
+        {!isManual && <Text style={[styles.tableCellHeader, { width: '25%' }]}>Source</Text>}
+        <Text style={[styles.tableCellHeader, { width: isManual ? '28%' : '23%' }]}>Issuing body</Text>
+        <Text style={[styles.tableCellHeader, { width: '15%' }]}>Expiry</Text>
+        {isManual && <Text style={[styles.tableCellHeader, { width: '25%' }]}>Notes</Text>}
+      </View>
+      {certs.map((c, i) => {
+        const expired = isExpired(c.expiryDate)
+        const expiring = isExpiringWithin90Days(c.expiryDate)
+        return (
+          <View key={i} style={styles.tableRow}>
+            <Text style={[styles.tableCell, { width: '32%' }]}>{certLabel(c)}</Text>
+            {!isManual && (
+              <Text style={[styles.tableCell, { width: '25%', color: SECONDARY, fontSize: 8 }]}>
+                {SOURCE_LABELS[c.sourceType] ?? c.sourceType}
+              </Text>
+            )}
+            <Text style={[styles.tableCell, { width: isManual ? '28%' : '23%', color: SECONDARY }]}>
+              {c.issuingBody ?? '—'}
+            </Text>
+            <Text style={[styles.tableCell, { width: '15%', color: expired ? '#791F1F' : expiring ? '#BA7517' : BODY, fontSize: 8 }]}>
+              {c.expiryDate ? new Date(c.expiryDate).toLocaleDateString('en-GB') : '—'}
+            </Text>
+            {isManual && (
+              <Text style={[styles.tableCell, { width: '25%', color: SECONDARY, fontSize: 8 }]}>
+                {c.notes ?? '—'}
+              </Text>
+            )}
+          </View>
+        )
+      })}
+    </>
+  )
+}
+
 function TrustCertsPage({ data }: { data: AssessmentPdfData }) {
   const { certifications } = data
+
   const autoCerts = certifications.filter(c => c.sourceType !== 'MANUAL')
   const manualCerts = certifications.filter(c => c.sourceType === 'MANUAL')
+
+  const securityCerts = autoCerts.filter(c => certCategory(c) === 'security')
+  const regulatoryCerts = autoCerts.filter(c => certCategory(c) === 'regulatory')
+  const otherCerts = autoCerts.filter(c => certCategory(c) === 'other')
 
   return (
     <Page size="A4" style={styles.page}>
       <PdfPageNumber />
       <SectionHeader>Trust &amp; Certifications</SectionHeader>
 
-      <SectionHeader>Portal Check Results</SectionHeader>
-      {autoCerts.length === 0 ? (
-        <Text style={{ fontSize: 10, color: SECONDARY, marginBottom: 8 }}>No certifications identified via trust portals.</Text>
+      {autoCerts.length === 0 && manualCerts.length === 0 ? (
+        <Text style={{ fontSize: 10, color: SECONDARY }}>No certifications on record for this assessment.</Text>
       ) : (
         <>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableCellHeader, { width: '30%' }]}>Certification</Text>
-            <Text style={[styles.tableCellHeader, { width: '30%' }]}>Source</Text>
-            <Text style={[styles.tableCellHeader, { width: '25%' }]}>Issuing body</Text>
-            <Text style={[styles.tableCellHeader, { width: '15%' }]}>Expiry</Text>
-          </View>
-          {autoCerts.map((c, i) => (
-            <View key={i} style={styles.tableRow}>
-              <Text style={[styles.tableCell, { width: '30%' }]}>{CERT_LABELS[c.certType] ?? c.certType}</Text>
-              <Text style={[styles.tableCell, { width: '30%', color: SECONDARY }]}>{SOURCE_LABELS[c.sourceType] ?? c.sourceType}</Text>
-              <Text style={[styles.tableCell, { width: '25%', color: SECONDARY }]}>{c.issuingBody ?? '—'}</Text>
-              <Text style={[styles.tableCell, { width: '15%', color: isExpired(c.expiryDate) ? '#791F1F' : isExpiringWithin90Days(c.expiryDate) ? '#BA7517' : BODY }]}>
-                {c.expiryDate ? new Date(c.expiryDate).toLocaleDateString('en-GB') : '—'}
+          {autoCerts.length === 0 ? (
+            <Text style={{ fontSize: 10, color: SECONDARY, marginBottom: 8 }}>No certifications identified via automated checks.</Text>
+          ) : (
+            <>
+              <Text style={{ fontSize: 9, color: SECONDARY, marginBottom: 6 }}>
+                Auto-discovered — unverified. Confirm against actual reports before relying on these.
               </Text>
-            </View>
-          ))}
-        </>
-      )}
+              <CertGroup title="Security certifications" certs={securityCerts} />
+              <CertGroup title="Regulatory & privacy frameworks" certs={regulatoryCerts} />
+              <CertGroup title="Other frameworks" certs={otherCerts} />
+            </>
+          )}
 
-      {manualCerts.length > 0 && (
-        <>
-          <SectionHeader>Manually Added Certifications</SectionHeader>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableCellHeader, { width: '28%' }]}>Certification</Text>
-            <Text style={[styles.tableCellHeader, { width: '25%' }]}>Issuing body</Text>
-            <Text style={[styles.tableCellHeader, { width: '15%' }]}>Expiry</Text>
-            <Text style={[styles.tableCellHeader, { width: '32%' }]}>Notes</Text>
-          </View>
-          {manualCerts.map((c, i) => {
-            const expired = isExpired(c.expiryDate)
-            const expiring = isExpiringWithin90Days(c.expiryDate)
-            return (
-              <View key={i} style={styles.tableRow}>
-                <Text style={[styles.tableCell, { width: '28%' }]}>{CERT_LABELS[c.certType] ?? c.certType}</Text>
-                <Text style={[styles.tableCell, { width: '25%', color: SECONDARY }]}>{c.issuingBody ?? '—'}</Text>
-                <Text style={[styles.tableCell, { width: '15%', color: expired ? '#791F1F' : expiring ? '#BA7517' : BODY }]}>
-                  {c.expiryDate ? new Date(c.expiryDate).toLocaleDateString('en-GB') : '—'}
-                  {expired ? ' ⚠ Expired' : expiring ? ' ⚠ Expiring' : ''}
-                </Text>
-                <Text style={[styles.tableCell, { width: '32%', color: SECONDARY, fontSize: 8 }]}>{c.notes ?? '—'}</Text>
-              </View>
-            )
-          })}
+          {manualCerts.length > 0 && (
+            <CertGroup title="Manually added certifications" certs={manualCerts} isManual />
+          )}
         </>
       )}
     </Page>
@@ -721,7 +792,7 @@ function FooterPage({ data }: { data: AssessmentPdfData }) {
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <PdfSeal size={80} />
         <Text style={{ fontSize: 9, color: SECONDARY, textAlign: 'center', marginTop: 16, lineHeight: 1.6 }}>
-          This report was generated by Fides, an AI-assisted vendor risk assessment platform.
+          This report was generated by Fides, an AI-assisted vendor trust assessment platform.
         </Text>
         <Text style={{ fontSize: 9, color: SECONDARY, textAlign: 'center', marginTop: 12, lineHeight: 1.6 }}>
           Data sources: Companies House · GLEIF · OFSI · OFAC · EU sanctions · NCSC · NewsAPI · Have I Been Pwned
@@ -746,14 +817,14 @@ export default function AssessmentReport({ data }: { data: AssessmentPdfData }) 
 
   return (
     <Document
-      title={`Vendor Risk Assessment — ${data.assessment.vendorName}`}
+      title={`Vendor Trust Assessment — ${data.assessment.vendorName}`}
       author={data.orgName}
-      subject="Vendor Risk Assessment Report"
+      subject="Vendor Trust Assessment Report"
       creator="Fides"
     >
       <CoverPage data={data} />
       <ExecutiveSummaryPage data={data} />
-      <ScoresPage data={data} />
+      <BandsPage data={data} />
       <DoraPage data={data} />
       <TrustCertsPage data={data} />
       {hasContract && <ContractPage data={data} />}

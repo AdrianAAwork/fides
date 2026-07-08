@@ -14,6 +14,14 @@ const TIER_COLORS: Record<string, string> = {
 
 const TIERS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
+const BAND_COLORS: Record<string, string> = {
+  'High':         'bg-[#EAF3DE] text-[#27500A]',
+  'Medium':       'bg-[#FAEEDA] text-[#633806]',
+  'Low':          'bg-[#FCEBEB] text-[#791F1F]',
+  'Needs review': 'bg-[#EEEDFE] text-[#3C3489]',
+  'Not assessed': 'bg-[#F9F8FD] text-[#5B5478]',
+}
+
 function scoreBarColor(score: number): string {
   if (score >= 80) return 'bg-[#3B6D11]'
   if (score >= 50) return 'bg-[#BA7517]'
@@ -144,7 +152,19 @@ export default function AssessmentList({ rows, currentTier, page, hasMore, canMo
                     )}
                   </td>
                   <td className="px-5 py-4 whitespace-nowrap">
-                    {row.riskTier ? (
+                    {row.suggestedOverallBand ? (
+                      <div className="space-y-0.5">
+                        {row.confirmedOverallBand ? (
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-medium ${BAND_COLORS[row.confirmedOverallBand] ?? 'bg-[#F9F8FD] text-[#5B5478]'}`}>
+                            {row.confirmedOverallBand}
+                          </span>
+                        ) : (
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-medium opacity-60 ${BAND_COLORS[row.suggestedOverallBand] ?? 'bg-[#F9F8FD] text-[#5B5478]'}`}>
+                            {row.suggestedOverallBand}
+                          </span>
+                        )}
+                      </div>
+                    ) : row.riskTier ? (
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-medium ${TIER_COLORS[row.riskTier] ?? 'bg-gray-100 text-gray-700'}`}>
                         {row.riskTier}
                       </span>
@@ -153,7 +173,7 @@ export default function AssessmentList({ rows, currentTier, page, hasMore, canMo
                     )}
                   </td>
                   <td className="px-5 py-4 whitespace-nowrap">
-                    {row.overallScore != null ? (
+                    {!row.suggestedOverallBand && row.overallScore != null ? (
                       <div>
                         <span className="text-[14px] font-medium text-[#1A1625]">{row.overallScore}</span>
                         <div className="mt-1 h-[3px] w-16 bg-[#F9F8FD] rounded-full overflow-hidden">
@@ -163,6 +183,8 @@ export default function AssessmentList({ rows, currentTier, page, hasMore, canMo
                           />
                         </div>
                       </div>
+                    ) : row.suggestedOverallBand && !row.confirmedOverallBand ? (
+                      <span className="text-[11px] text-[#B8B3CE]">Pending confirmation</span>
                     ) : (
                       <span className="text-[#B8B3CE] text-[13px]">—</span>
                     )}

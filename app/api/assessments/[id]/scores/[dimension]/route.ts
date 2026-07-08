@@ -5,6 +5,13 @@ import { db } from '@/src/db'
 import { assessments, assessmentScores, auditLog } from '@/src/db/schema'
 import { and, eq } from 'drizzle-orm'
 import { recalculateOverall } from '@/src/lib/recalculate'
+import type { TrustBand } from '@/src/lib/pipeline/types'
+
+const VALID_BANDS: Set<TrustBand> = new Set(['High', 'Medium', 'Low', 'Not assessed', 'Needs review'])
+
+const VALID_DIMENSIONS = new Set([
+  'FINANCIAL_HEALTH', 'BREACH_HISTORY', 'SANCTIONS', 'OWNERSHIP', 'TRUST_CERTS', 'NEWS_SENTIMENT',
+])
 
 export async function PUT(
   req: Request,
@@ -18,9 +25,6 @@ export async function PUT(
 
   const { id: assessmentId, dimension } = await params
 
-  const VALID_DIMENSIONS = new Set([
-    'FINANCIAL_HEALTH', 'BREACH_HISTORY', 'SANCTIONS', 'OWNERSHIP', 'TRUST_CERTS', 'NEWS_SENTIMENT',
-  ])
   if (!VALID_DIMENSIONS.has(dimension)) {
     return NextResponse.json({ error: 'Invalid dimension' }, { status: 400 })
   }
@@ -32,17 +36,14 @@ export async function PUT(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const newScore = typeof body.newScore === 'number' ? body.newScore : Number(body.newScore)
-  const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+  // Band-based confirm/override
+  const confirmedBand = typeof body.confirmedBand === 'string' ? body.confirmedBand as TrustBand : null
+  const note = typeof body.note === 'string' ? body.note.trim() : ''
 
-  if (!Number.isInteger(newScore) || newScore < 0 || newScore > 100) {
-    return NextResponse.json({ error: 'Score must be an integer between 0 and 100' }, { status: 400 })
-  }
-  if (reason.length < 10) {
-    return NextResponse.json({ error: 'Reason must be at least 10 characters' }, { status: 400 })
+  if (!confirmedBand || !VALID_BANDS.has(confirmedBand)) {
+    return NextResponse.json({ error: 'confirmedBand must be one of: High, Medium, Low, Not assessed, Needs review' }, { status: 400 })
   }
 
-  // Verify the assessment belongs to this org
   const [assessment] = await db
     .select({ id: assessments.id })
     .from(assessments)
@@ -51,7 +52,6 @@ export async function PUT(
 
   if (!assessment) return NextResponse.json({ error: 'Assessment not found' }, { status: 404 })
 
-  // Find the score row for this dimension
   const [scoreRow] = await db
     .select()
     .from(assessmentScores)
@@ -65,57 +65,64 @@ export async function PUT(
 
   if (!scoreRow) return NextResponse.json({ error: 'Score not found' }, { status: 404 })
 
-  const oldScore = scoreRow.finalScore
+  const suggestedBand = scoreRow.suggestedBand
+  const isOverride = confirmedBand !== suggestedBand
 
-  // Update the score row and recalculate overall — in a transaction
+  // Note is required when overriding (different from suggestion); optional when confirming
+  if (isOverride && note.length < 10) {
+    return NextResponse.json({ error: 'A note (at least 10 characters) is required when overriding the suggested band.' }, { status: 400 })
+  }
+
   const result = await db.transaction(async (tx) => {
-    // 1. Update the dimension score
     await tx
       .update(assessmentScores)
       .set({
-        finalScore: newScore,
-        isOverridden: true,
-        overrideReason: reason,
+        confirmedBand,
+        isOverridden: isOverride,
+        overrideReason: note || null,
         overriddenBy: ctx.user.id,
         overriddenAt: new Date(),
       })
       .where(eq(assessmentScores.id, scoreRow.id))
 
-    // 2. Fetch all current scores to recalculate overall
     const allScores = await tx
       .select({
         dimension: assessmentScores.dimension,
         finalScore: assessmentScores.finalScore,
         sourceData: assessmentScores.sourceData,
+        suggestedBand: assessmentScores.suggestedBand,
+        confirmedBand: assessmentScores.confirmedBand,
       })
       .from(assessmentScores)
       .where(eq(assessmentScores.assessmentId, assessmentId))
 
-    // Substitute the new score for the dimension being overridden
     const updatedScores = allScores.map((s) =>
-      s.dimension === dimension ? { ...s, finalScore: newScore } : s
+      s.dimension === dimension ? { ...s, confirmedBand } : s
     )
 
-    const { overallScore, riskTier } = recalculateOverall(updatedScores)
+    const { overallScore, riskTier, suggestedOverallBand } = recalculateOverall(updatedScores)
 
-    // 3. Update the assessment record
     await tx
       .update(assessments)
-      .set({ overallScore, riskTier, updatedAt: new Date() })
+      .set({
+        overallScore: overallScore || null,
+        riskTier,
+        suggestedOverallBand: suggestedOverallBand ?? null,
+        updatedAt: new Date(),
+      })
       .where(eq(assessments.id, assessmentId))
 
-    // 4. Audit log
     await tx.insert(auditLog).values({
       assessmentId,
       orgId: ctx.org.id,
       userId: ctx.user.id,
-      actionType: 'SCORE_OVERRIDDEN',
-      oldValue: { dimension, score: oldScore } as Record<string, unknown>,
-      newValue: { dimension, score: newScore } as Record<string, unknown>,
-      reason,
+      actionType: 'BAND_CONFIRMED',
+      oldValue: { dimension, band: suggestedBand } as Record<string, unknown>,
+      newValue: { dimension, band: confirmedBand, isOverride } as Record<string, unknown>,
+      reason: note || null,
     })
 
-    return { overallScore, riskTier }
+    return { overallScore, riskTier, suggestedOverallBand }
   })
 
   return NextResponse.json({ ok: true, ...result })

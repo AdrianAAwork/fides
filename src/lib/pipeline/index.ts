@@ -11,9 +11,11 @@ import { fetchCompaniesHouseProfile } from './companies-house'
 import { fetchGleif } from './gleif'
 import { screenSanctions } from './sanctions'
 import { fetchNews, fetchHibp } from './news'
-import { fetchTrustPortals } from './trust-portals'
+import { findTrustPortal, adaptFindingToTrustPortals } from './trust-finder'
+import type { TrustFinding } from './trust-finder/types'
+import { checkIasmeRegistry } from './iasme'
 import { callGoingConcern, callNewsSentiment, callExecSummary } from './claude'
-import { calculateScores, shouldTriggerQuestionnaire } from './scoring'
+import { calculateBands, shouldTriggerQuestionnaire } from './scoring'
 import { eq, and } from 'drizzle-orm'
 
 export interface PipelineInput {
@@ -22,11 +24,12 @@ export interface PipelineInput {
   orgId: string
   userId: string
   previousAssessmentId?: string
+  vendorDomain?: string  // caller-supplied domain; takes priority over ch.website
 }
 
 export type PipelineEvent =
   | { type: 'step'; step: string; status: 'running' | 'done' | 'warn'; message?: string }
-  | { type: 'complete'; assessmentId: string; riskTier: string; overallScore: number }
+  | { type: 'complete'; assessmentId: string; riskTier: string; overallScore: number; suggestedOverallBand: string }
   | { type: 'error'; message: string }
 
 export async function* runPipeline(input: PipelineInput): AsyncGenerator<PipelineEvent> {
@@ -56,16 +59,69 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
   yield { type: 'step', step: 'trust_portals', status: 'running' }
 
   const officerNames = ch.officers.filter((o) => !o.resigned_on).map((o) => o.name)
-  const website = ch.website
+
+  // Domain priority: user-supplied > Companies House website > empty
+  const websiteRaw = input.vendorDomain || ch.website
+  let domain = ''
+  try {
+    if (websiteRaw) {
+      domain = new URL(websiteRaw.startsWith('http') ? websiteRaw : `https://${websiteRaw}`).hostname
+    }
+  } catch {
+    domain = ''
+  }
+
+  console.log(`[pipeline:trust-finder] vendor="${ch.company_name || vendorName}" domain="${domain}" source=${input.vendorDomain ? 'user-input' : ch.website ? 'companies-house' : 'none'}`)
+
+  const NOT_FOUND_FINDING: TrustFinding = {
+    vendor: ch.company_name || vendorName,
+    domain,
+    state: 'NOT_FOUND',
+    confidence: 'low',
+    sourceUrl: null,
+    sourceTier: null,
+    platform: null,
+    certsClaimed: [],
+    warning: 'Trust finder could not be reached — verify certifications manually.',
+    trace: { rungsAttempted: [], fetchBuckets: [], modelCalls: 0, elapsedMs: 0, blockedAtTrustShapedUrl: false },
+  }
 
   // Phase A — parallel
-  const [gleif, sanctions, news, trustPortals, hibp] = await Promise.all([
-    fetchGleif(vendorName, ch.company_number || undefined),
+  const [gleif, sanctions, news, trustFinding, hibp, iasme] = await Promise.all([
+    fetchGleif(vendorName, ch.company_number || undefined, ch.foreignOriginatingCountry ?? ch.foreignGoverningLaw ?? ch.jurisdiction),
     screenSanctions(vendorName, officerNames),
     fetchNews(vendorName),
-    fetchTrustPortals(ch.company_name || vendorName, website),
-    fetchHibp(website ? new URL(website.startsWith('http') ? website : `https://${website}`).hostname : ''),
+    findTrustPortal(ch.company_name || vendorName, domain).catch((err) => {
+      console.error('[pipeline] trust-finder failed, degrading to NOT_FOUND:', err)
+      return NOT_FOUND_FINDING
+    }),
+    fetchHibp(domain),
+    checkIasmeRegistry(ch.company_name || vendorName),
   ])
+
+  const rawTrustPortals = adaptFindingToTrustPortals(trustFinding)
+
+  // Merge IASME registry result into trust portals.
+  // If IASME confirms Cyber Essentials and the trust-finder didn't already find it,
+  // add the cert and update the overall status to 'found'.
+  const iasmeAlreadyCovered = rawTrustPortals.certs_found.some(
+    (c) => c.certType === 'CYBER_ESSENTIALS' || c.certType === 'CYBER_ESSENTIALS_PLUS'
+  )
+  const iasmeExtraCerts = iasme.found && !iasmeAlreadyCovered
+    ? [{ certType: 'CYBER_ESSENTIALS' as const, source: 'iasme', sourceUrl: 'https://iasme.co.uk/cyber-essentials/certified-organisations/', issuingBody: 'IASME', notes: 'Verified via IASME Cyber Essentials registry' }]
+    : []
+
+  const trustPortals = {
+    ...rawTrustPortals,
+    certs_found: [...rawTrustPortals.certs_found, ...iasmeExtraCerts],
+    status: (iasme.found && rawTrustPortals.status === 'not_found')
+      ? 'found' as const
+      : rawTrustPortals.status,
+    scrape_metadata: {
+      ...rawTrustPortals.scrape_metadata,
+      iasme,
+    },
+  }
 
   yield { type: 'step', step: 'gleif', status: gleif.error ? 'warn' : 'done', message: gleif.error }
   yield { type: 'step', step: 'sanctions', status: sanctions.error ? 'warn' : 'done', message: sanctions.error }
@@ -88,12 +144,12 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
 
   // Phase C — scoring
   yield { type: 'step', step: 'scoring', status: 'running' }
-  const scores = calculateScores(ch, gleif, sanctions, news, hibp, trustPortals, goingConcern, newsSentiment)
+  const bands = calculateBands(ch, gleif, sanctions, hibp, trustPortals, goingConcern, newsSentiment)
   yield { type: 'step', step: 'scoring', status: 'done' }
 
   // Phase D — exec summary
   yield { type: 'step', step: 'summary', status: 'running' }
-  const execSummary = await callExecSummary(scores, vendorName)
+  const execSummary = await callExecSummary(bands, vendorName, { trustPortals, gleif, hibp })
   yield { type: 'step', step: 'summary', status: execSummary.status === 'summary_unavailable' ? 'warn' : 'done' }
 
   // Phase E — DB writes in a single transaction
@@ -116,21 +172,22 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
         incorporationDate: ch.date_of_creation ?? null,
         companyStatus: ch.company_status ?? null,
         assessmentStatus: 'COMPLETE',
-        riskTier: scores.riskTier,
-        overallScore: scores.overallScore,
+        riskTier: bands.riskTier,
+        overallScore: null,
+        suggestedOverallBand: bands.suggestedOverallBand,
         execSummaryJson: execSummary as unknown as Record<string, unknown>,
       }).returning({ id: assessments.id })
 
       const aId = assessment.id
 
-      // Insert 6 dimension scores
+      // Insert 6 dimension bands
       const dimensionRows = [
-        scores.financial_health,
-        scores.breach_history,
-        scores.sanctions,
-        scores.ownership,
-        scores.trust_certs,
-        scores.news_sentiment,
+        bands.financial_health,
+        bands.breach_history,
+        bands.sanctions,
+        bands.ownership,
+        bands.trust_certs,
+        bands.news_sentiment,
       ] as const
 
       for (const dim of dimensionRows) {
@@ -138,29 +195,34 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
           assessmentId: aId,
           orgId,
           dimension: dim.dimension as 'FINANCIAL_HEALTH' | 'BREACH_HISTORY' | 'SANCTIONS' | 'OWNERSHIP' | 'TRUST_CERTS' | 'NEWS_SENTIMENT',
-          rawScore: dim.rawScore,
-          finalScore: dim.finalScore,
+          rawScore: 0,
+          finalScore: 0,
+          suggestedBand: dim.suggestedBand,
           sourceData: dim.sourceData as Record<string, unknown>,
           fetchedAt: dim.fetchedAt,
         })
       }
 
-      // Insert certifications found
-      for (const cert of trustPortals.certs_found) {
+      // Insert certifications found (expiryDate always null — not verified by agent).
+      // Includes both security certs (certs_found) and regulatory/other frameworks (frameworks_found).
+      const allAutoFound = [
+        ...trustPortals.certs_found,
+        ...(trustPortals.frameworks_found ?? []),
+      ]
+      for (const cert of allAutoFound) {
         await tx.insert(certifications).values({
           assessmentId: aId,
           orgId,
           certType: cert.certType as 'SOC2_TYPE_I' | 'SOC2_TYPE_II' | 'ISO_27001' | 'ISO_22301' | 'ISO_27701' | 'CYBER_ESSENTIALS' | 'CYBER_ESSENTIALS_PLUS' | 'PCI_DSS' | 'CSA_STAR' | 'OTHER',
-          sourceType: cert.source === 'ncsc'
-            ? 'AUTO_WEB'
-            : cert.source === 'vanta'
+          sourceType: cert.source === 'vanta'
             ? 'AUTO_VANTA'
             : cert.source === 'safebase'
             ? 'AUTO_SAFEBASE'
             : 'AUTO_WEB',
-          sourceUrl: null,
+          sourceUrl: cert.sourceUrl ?? null,
           issuingBody: cert.issuingBody ?? null,
-          expiryDate: cert.expiryDate ?? null,
+          expiryDate: null,
+          notes: cert.notes ?? null,
           retrievedAt: new Date(),
         })
       }
@@ -171,17 +233,18 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
         orgId,
         userId,
         actionType: 'ASSESSMENT_CREATED',
-        newValue: { riskTier: scores.riskTier, overallScore: scores.overallScore } as Record<string, unknown>,
+        newValue: { riskTier: bands.riskTier, suggestedOverallBand: bands.suggestedOverallBand } as Record<string, unknown>,
       })
 
-      // Reassessment schedule — interval based on risk tier
+      // Reassessment schedule — interval based on suggested band
       const REASSESSMENT_MONTHS: Record<string, number> = {
-        CRITICAL: 6,
-        HIGH: 12,
-        MEDIUM: 18,
-        LOW: 24,
+        High: 24,
+        Medium: 18,
+        Low: 6,
+        'Needs review': 12,
+        'Not assessed': 12,
       }
-      const months = REASSESSMENT_MONTHS[scores.riskTier] ?? 12
+      const months = REASSESSMENT_MONTHS[bands.suggestedOverallBand] ?? 12
       const scheduledDate = new Date()
       scheduledDate.setMonth(scheduledDate.getMonth() + months)
       const scheduledDateStr = scheduledDate.toISOString().split('T')[0]
@@ -223,7 +286,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
       // Questionnaire trigger
       const shouldTrigger = shouldTriggerQuestionnaire(
         ch, sanctions, hibp, trustPortals,
-        scores.financial_health, newsSentiment, gleif, goingConcern
+        bands.financial_health, newsSentiment, gleif, goingConcern
       )
 
       if (shouldTrigger) {
@@ -231,7 +294,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
         if (sanctions.highestLevel === 'confirmed') reasons.push('sanctions_confirmed')
         if (ch.company_status !== 'active') reasons.push('company_not_active')
         if (trustPortals.certs_found.length === 0) reasons.push('no_trust_certs')
-        if (scores.financial_health.finalScore < 40) reasons.push('low_financial_health')
+        if (bands.financial_health.suggestedBand === 'Low') reasons.push('low_financial_health')
         if (newsSentiment.sentiment === 'negative') reasons.push('negative_news')
         if (goingConcern.going_concern) reasons.push('going_concern')
 
@@ -254,5 +317,5 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<Pipelin
   }
 
   yield { type: 'step', step: 'saving', status: 'done' }
-  yield { type: 'complete', assessmentId, riskTier: scores.riskTier, overallScore: scores.overallScore }
+  yield { type: 'complete', assessmentId, riskTier: bands.riskTier, overallScore: 0, suggestedOverallBand: bands.suggestedOverallBand }
 }

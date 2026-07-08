@@ -3,45 +3,57 @@ import type {
   CompaniesHouseData,
   GleifData,
   SanctionsData,
-  NewsData,
   HibpData,
   TrustPortalsData,
   GoingConcernResult,
   NewsSentimentResult,
-  DimensionScore,
-  PipelineScores,
+  TrustBand,
+  DimensionBand,
+  PipelineBands,
 } from './types'
 
 const HIGH_SCORING_JURISDICTIONS = new Set([
   'GB', 'US', 'AU', 'CA', 'JP', 'CH', 'NO', 'NZ', 'SG',
-  // EU member states (ISO-2)
   'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI',
   'FR', 'GR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT',
   'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK',
 ])
 
-function scoreFinancialHealth(ch: CompaniesHouseData, goingConcern: GoingConcernResult): DimensionScore {
-  let score = 100
+// ── Band → risk-tier mapping (for backward-compat callers) ────────────────────
 
-  if (ch.accounts?.overdue) score -= 40
-  if (ch.confirmation_statement?.overdue) score -= 20
-  if (ch.company_status && ch.company_status !== 'active') score -= 60
-
-  if (!ch.accounts?.overdue && ch.accounts?.next_due) {
-    const nextDue = new Date(ch.accounts.next_due)
-    const cutoff = new Date()
-    cutoff.setMonth(cutoff.getMonth() - 18)
-    if (nextDue < cutoff) score -= 30
+function bandToTier(band: TrustBand): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
+  switch (band) {
+    case 'High': return 'LOW'
+    case 'Medium': return 'MEDIUM'
+    case 'Low': return 'HIGH'
+    case 'Needs review': return 'HIGH'
+    case 'Not assessed': return 'MEDIUM'
   }
+}
 
-  if (goingConcern.status === 'checked' && goingConcern.going_concern) score -= 30
+// ── Dimension band functions ───────────────────────────────────────────────────
 
-  const finalScore = Math.max(0, score)
+function bandFinancialHealth(ch: CompaniesHouseData, goingConcern: GoingConcernResult): DimensionBand {
+  const status = ch.company_status
+
+  let band: TrustBand
+
+  if (!status || status === 'unknown') {
+    band = 'Needs review'
+  } else if (status !== 'active') {
+    band = 'Low'
+  } else if (goingConcern.status === 'checked' && goingConcern.going_concern) {
+    // Going concern detected — if high confidence → Low; otherwise → Needs review
+    band = goingConcern.confidence === 'high' ? 'Low' : 'Needs review'
+  } else if (ch.accounts?.overdue || ch.confirmation_statement?.overdue) {
+    band = 'Medium'
+  } else {
+    band = 'High'
+  }
 
   return {
     dimension: 'FINANCIAL_HEALTH',
-    rawScore: finalScore,
-    finalScore,
+    suggestedBand: band,
     sourceData: {
       company_status: ch.company_status,
       accounts: ch.accounts,
@@ -53,53 +65,44 @@ function scoreFinancialHealth(ch: CompaniesHouseData, goingConcern: GoingConcern
   }
 }
 
-function scoreBreachHistory(hibp: HibpData): DimensionScore {
+function bandBreachHistory(hibp: HibpData): DimensionBand {
+  let band: TrustBand
+
   if (!hibp.enabled) {
-    return {
-      dimension: 'BREACH_HISTORY',
-      rawScore: 75,
-      finalScore: 75,
-      sourceData: { enabled: false, note: 'HIBP not enabled' },
-      fetchedAt: new Date(),
-    }
+    band = 'Not assessed'
+  } else if (hibp.error) {
+    band = 'Not assessed'
+  } else if (hibp.breaches.length === 0) {
+    band = 'High'
+  } else {
+    // Breaches found — Fides can detect the fact but not judge severity/materiality
+    band = 'Needs review'
   }
 
-  let score = 100
-  const now = new Date()
-  const cutoff24m = new Date(now)
-  cutoff24m.setMonth(cutoff24m.getMonth() - 24)
-
-  for (const breach of hibp.breaches) {
-    const breachDate = new Date(breach.BreachDate)
-    if (breachDate >= cutoff24m) {
-      score -= 25
-    } else {
-      score -= 10
-    }
-  }
-
-  const finalScore = Math.max(0, score)
   return {
     dimension: 'BREACH_HISTORY',
-    rawScore: finalScore,
-    finalScore,
-    sourceData: { breaches: hibp.breaches, error: hibp.error },
+    suggestedBand: band,
+    sourceData: { enabled: hibp.enabled, breaches: hibp.breaches, error: hibp.error },
     fetchedAt: new Date(),
   }
 }
 
-function scoreSanctions(sanctions: SanctionsData): DimensionScore {
-  let score: number
-  switch (sanctions.highestLevel) {
-    case 'confirmed': score = 0; break
-    case 'possible': score = 40; break
-    default: score = 100
+function bandSanctions(sanctions: SanctionsData): DimensionBand {
+  let band: TrustBand
+
+  if (sanctions.error) {
+    band = 'Needs review'
+  } else {
+    switch (sanctions.highestLevel) {
+      case 'confirmed': band = 'Low'; break
+      case 'possible':  band = 'Needs review'; break
+      default:          band = 'High'
+    }
   }
 
   return {
     dimension: 'SANCTIONS',
-    rawScore: score,
-    finalScore: score,
+    suggestedBand: band,
     sourceData: {
       screened: sanctions.screened,
       matches: sanctions.matches,
@@ -110,26 +113,31 @@ function scoreSanctions(sanctions: SanctionsData): DimensionScore {
   }
 }
 
-function scoreOwnership(gleif: GleifData): DimensionScore {
+function bandOwnership(gleif: GleifData): DimensionBand {
+  let band: TrustBand
   const jurisdiction = gleif.jurisdiction ?? ''
 
-  let score: number
-  if (HIGH_SCORING_JURISDICTIONS.has(jurisdiction.toUpperCase())) {
-    score = 95
-  } else if (FATF_BLACK_LIST.some((c) => jurisdiction.toLowerCase().includes(c.toLowerCase()))) {
-    score = 10
-  } else if (FATF_GREY_LIST.some((c) => jurisdiction.toLowerCase().includes(c.toLowerCase()))) {
-    score = 40
+  if (!gleif.lei) {
+    // No GLEIF record — honest absence
+    band = gleif.error ? 'Needs review' : 'Not assessed'
+  } else if (gleif.matchMethod === 'nameSearch') {
+    // Name-search match may be the wrong entity — analyst must confirm
+    band = 'Needs review'
+  } else if (FATF_BLACK_LIST.some(c => jurisdiction.toLowerCase().includes(c.toLowerCase()))) {
+    band = 'Low'
+  } else if (FATF_GREY_LIST.some(c => jurisdiction.toLowerCase().includes(c.toLowerCase()))) {
+    band = 'Needs review'
+  } else if (HIGH_SCORING_JURISDICTIONS.has(jurisdiction.toUpperCase())) {
+    band = 'High'
   } else if (!jurisdiction) {
-    score = 40
+    band = 'Needs review'
   } else {
-    score = 65 // FATF member in good standing
+    band = 'Medium' // FATF member in good standing but not a high-trust jurisdiction
   }
 
   return {
     dimension: 'OWNERSHIP',
-    rawScore: score,
-    finalScore: score,
+    suggestedBand: band,
     sourceData: {
       lei: gleif.lei,
       legalName: gleif.legalName,
@@ -137,43 +145,28 @@ function scoreOwnership(gleif: GleifData): DimensionScore {
       category: gleif.category,
       status: gleif.status,
       ultimateParent: gleif.ultimateParent,
+      matchMethod: gleif.matchMethod,
       error: gleif.error,
     },
     fetchedAt: new Date(),
   }
 }
 
-function scoreTrustCerts(trustPortals: TrustPortalsData): DimensionScore {
-  const certs = trustPortals.certs_found
-  let score = 0
+function bandTrustCerts(trustPortals: TrustPortalsData): DimensionBand {
+  let band: TrustBand
 
-  if (certs.length === 0) {
-    score = trustPortals.status === 'inconclusive' ? 25 : 15
+  if (trustPortals.status === 'not_found') {
+    band = 'Low'
+  } else if (trustPortals.status === 'inconclusive') {
+    band = 'Needs review'
   } else {
-    for (const cert of certs) {
-      const type = cert.certType
-
-      if (type === 'SOC2_TYPE_II') {
-        score += 40
-      } else if (type === 'ISO_27001') {
-        score += 30
-      } else if (type === 'CYBER_ESSENTIALS_PLUS') {
-        score += 20
-      } else if (type === 'CYBER_ESSENTIALS') {
-        score += 15
-      } else if (type === 'ISO_22301') {
-        score += 10
-      } else {
-        score += 15 // unconfirmed cert
-      }
-    }
+    // found — band from presence of security certs (no numeric threshold)
+    band = trustPortals.certs_found.length > 0 ? 'High' : 'Medium'
   }
 
-  const finalScore = Math.min(100, score)
   return {
     dimension: 'TRUST_CERTS',
-    rawScore: finalScore,
-    finalScore,
+    suggestedBand: band,
     sourceData: {
       certs_found: trustPortals.certs_found,
       status: trustPortals.status,
@@ -184,24 +177,28 @@ function scoreTrustCerts(trustPortals: TrustPortalsData): DimensionScore {
   }
 }
 
-function scoreNewsSentiment(sentiment: NewsSentimentResult): DimensionScore {
-  let score: number
-  switch (sentiment.sentiment) {
-    case 'positive': score = 90; break
-    case 'neutral': score = 80; break
-    case 'mixed': score = 50; break
-    case 'negative': score = 20; break
-    default: score = 80
-  }
+function bandNewsSentiment(sentiment: NewsSentimentResult): DimensionBand {
+  let band: TrustBand
 
   if (sentiment.status === 'not_checked' || sentiment.status === 'summary_unavailable') {
-    score = 80
+    band = 'Not assessed'
+  } else {
+    switch (sentiment.sentiment) {
+      case 'positive':
+      case 'neutral':
+        band = 'High'; break
+      case 'mixed':
+        band = 'Medium'; break
+      case 'negative':
+        band = 'Needs review'; break
+      default:
+        band = 'Not assessed'
+    }
   }
 
   return {
     dimension: 'NEWS_SENTIMENT',
-    rawScore: score,
-    finalScore: score,
+    suggestedBand: band,
     sourceData: {
       sentiment: sentiment.sentiment,
       risk_items: sentiment.risk_items,
@@ -214,80 +211,50 @@ function scoreNewsSentiment(sentiment: NewsSentimentResult): DimensionScore {
   }
 }
 
-function weightedScore(scores: Record<string, DimensionScore>): number {
-  const weights: Record<string, number> = {
-    FINANCIAL_HEALTH: 20,
-    BREACH_HISTORY: 25,
-    SANCTIONS: 15,
-    OWNERSHIP: 10,
-    TRUST_CERTS: 20,
-    NEWS_SENTIMENT: 10,
-  }
+// ── Overall band roll-up ──────────────────────────────────────────────────────
 
-  let total = 0
-  for (const [dim, weight] of Object.entries(weights)) {
-    const s = scores[dim]
-    if (s) total += (s.finalScore * weight) / 100
-  }
-  return Math.round(total)
+function suggestOverallBand(dims: DimensionBand[]): TrustBand {
+  const assessed = dims.filter(d => d.suggestedBand !== 'Not assessed')
+
+  if (assessed.length === 0) return 'Not assessed'
+
+  if (assessed.some(d => d.suggestedBand === 'Low'))          return 'Low'
+  if (assessed.some(d => d.suggestedBand === 'Needs review')) return 'Needs review'
+  if (assessed.every(d => d.suggestedBand === 'High'))        return 'High'
+  return 'Medium'
 }
 
-function toTier(score: number): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
-  if (score >= 75) return 'LOW'
-  if (score >= 50) return 'MEDIUM'
-  if (score >= 25) return 'HIGH'
-  return 'CRITICAL'
-}
+// ── Public API ────────────────────────────────────────────────────────────────
 
-export function calculateScores(
+export function calculateBands(
   ch: CompaniesHouseData,
   gleif: GleifData,
   sanctions: SanctionsData,
-  news: NewsData,
   hibp: HibpData,
   trustPortals: TrustPortalsData,
   goingConcern: GoingConcernResult,
   newsSentiment: NewsSentimentResult
-): PipelineScores {
-  const financial = scoreFinancialHealth(ch, goingConcern)
-  const breach = scoreBreachHistory(hibp)
-  const sanctionsScore = scoreSanctions(sanctions)
-  const ownership = scoreOwnership(gleif)
-  const trust = scoreTrustCerts(trustPortals)
-  const sentimentScore = scoreNewsSentiment(newsSentiment)
+): PipelineBands {
+  const financial  = bandFinancialHealth(ch, goingConcern)
+  const breach     = bandBreachHistory(hibp)
+  const sanctionsBand = bandSanctions(sanctions)
+  const ownership  = bandOwnership(gleif)
+  const trust      = bandTrustCerts(trustPortals)
+  const sentiment  = bandNewsSentiment(newsSentiment)
 
-  const dimensionMap: Record<string, DimensionScore> = {
-    FINANCIAL_HEALTH: financial,
-    BREACH_HISTORY: breach,
-    SANCTIONS: sanctionsScore,
-    OWNERSHIP: ownership,
-    TRUST_CERTS: trust,
-    NEWS_SENTIMENT: sentimentScore,
-  }
-
-  const overall = weightedScore(dimensionMap)
-  let tier = toTier(overall)
-
-  // Special override rules
-  if (sanctions.highestLevel !== 'none') {
-    if (tier === 'LOW' || tier === 'MEDIUM') tier = 'HIGH'
-  }
-  if (ch.company_status && ch.company_status !== 'active') {
-    if (tier === 'LOW' || tier === 'MEDIUM') tier = 'HIGH'
-  }
-  if (goingConcern.status === 'checked' && goingConcern.going_concern && goingConcern.confidence === 'high') {
-    if (tier === 'LOW') tier = 'MEDIUM'
-  }
+  const allDims = [financial, breach, sanctionsBand, ownership, trust, sentiment]
+  const suggestedOverallBand = suggestOverallBand(allDims)
 
   return {
     financial_health: financial,
     breach_history: breach,
-    sanctions: sanctionsScore,
+    sanctions: sanctionsBand,
     ownership,
     trust_certs: trust,
-    news_sentiment: sentimentScore,
-    overallScore: overall,
-    riskTier: tier,
+    news_sentiment: sentiment,
+    suggestedOverallBand,
+    riskTier: bandToTier(suggestedOverallBand),
+    overallScore: 0,
   }
 }
 
@@ -296,7 +263,7 @@ export function shouldTriggerQuestionnaire(
   sanctions: SanctionsData,
   hibp: HibpData,
   trustPortals: TrustPortalsData,
-  financial: DimensionScore,
+  financial: DimensionBand,
   newsSentiment: NewsSentimentResult,
   gleif: GleifData,
   goingConcern: GoingConcernResult
@@ -305,7 +272,6 @@ export function shouldTriggerQuestionnaire(
   if (sanctions.highestLevel === 'confirmed') return true
   if (ch.company_status && ch.company_status !== 'active') return true
 
-  // Count conditional triggers
   let count = 0
 
   if (trustPortals.status === 'inconclusive' || trustPortals.certs_found.length === 0) count++
@@ -318,7 +284,7 @@ export function shouldTriggerQuestionnaire(
     if (recentBreach) count++
   }
 
-  if (financial.finalScore < 40) count++
+  if (financial.suggestedBand === 'Low') count++
   if (newsSentiment.sentiment === 'negative') count++
 
   const jurisdiction = gleif.jurisdiction ?? ''
@@ -332,4 +298,21 @@ export function shouldTriggerQuestionnaire(
   if (goingConcern.status === 'checked' && goingConcern.going_concern) count++
 
   return count >= 2
+}
+
+// ── Band roll-up from stored DB rows (for recalculate after overrides) ────────
+
+export function rollUpOverallBand(
+  rows: Array<{ dimension: string; suggestedBand: string | null; confirmedBand: string | null }>
+): TrustBand {
+  const VALID: Set<TrustBand> = new Set(['High', 'Medium', 'Low', 'Not assessed', 'Needs review'])
+
+  const effectiveBands: TrustBand[] = rows.map(r => {
+    const b = r.confirmedBand ?? r.suggestedBand ?? 'Not assessed'
+    return VALID.has(b as TrustBand) ? (b as TrustBand) : 'Not assessed'
+  })
+
+  return suggestOverallBand(
+    effectiveBands.map(b => ({ dimension: '', suggestedBand: b, sourceData: {}, fetchedAt: new Date() }))
+  )
 }

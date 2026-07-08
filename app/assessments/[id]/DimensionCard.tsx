@@ -15,15 +15,24 @@ export interface CertRow {
   expiryDate: string | null
   sourceUrl: string | null
   notes: string | null
+  sourceType: string         // 'MANUAL' | 'AUTO_VANTA' | 'AUTO_SAFEBASE' | 'AUTO_WEB'
+  verifiedBy: string | null  // null = auto-discovered, unverified
+  isRelevant: boolean
 }
 
 interface Props {
   dimension: string
   label: string
-  weight: number
+  // Band fields (new assessments)
+  suggestedBand: string | null
+  confirmedBand: string | null
+  confirmedBy: string | null
+  confirmedAt: Date | string | null
+  analystNote: string | null
+  isOverridden: boolean
+  // Legacy numeric fields (old assessments without bands)
   finalScore: number
   rawScore: number
-  isOverridden: boolean
   overrideReason: string | null
   overriddenAt: Date | string | null
   sourceData: Record<string, unknown> | null
@@ -64,7 +73,7 @@ const SOURCE_LABELS: Record<string, string> = {
   BREACH_HISTORY: 'Have I Been Pwned (HIBP)',
   SANCTIONS: 'OFSI · OFAC · EU (Neon DB)',
   OWNERSHIP: 'GLEIF',
-  TRUST_CERTS: 'IASME · Vanta · SafeBase · vendor website',
+  TRUST_CERTS: 'Trust Finder (web scraping + Claude AI extraction)',
   NEWS_SENTIMENT: 'NewsAPI + Claude AI',
 }
 
@@ -75,7 +84,7 @@ const HIGH_JURISDICTIONS = new Set([
   'NL','PL','PT','RO','SE','SI','SK',
 ])
 
-// ── Score colour ──────────────────────────────────────────────────────────────
+// ── Score colour (legacy) ─────────────────────────────────────────────────────
 
 function scoreTextColor(s: number): string {
   if (s >= 80) return 'text-[#3B6D11]'
@@ -88,6 +97,23 @@ function scoreBarColor(s: number): string {
   if (s >= 50) return 'bg-[#BA7517]'
   return 'bg-[#A32D2D]'
 }
+
+// ── Band helpers ──────────────────────────────────────────────────────────────
+
+const BAND_COLORS: Record<string, { text: string; bg: string; border: string }> = {
+  'High':         { text: 'text-[#27500A]', bg: 'bg-[#EAF3DE]', border: 'border-[#C5DFA8]' },
+  'Medium':       { text: 'text-[#633806]', bg: 'bg-[#FAEEDA]', border: 'border-[#F0D5A0]' },
+  'Low':          { text: 'text-[#791F1F]', bg: 'bg-[#FCEBEB]', border: 'border-[#F5C6C6]' },
+  'Needs review': { text: 'text-[#3C3489]', bg: 'bg-[#EEEDFE]', border: 'border-[#C9C4F8]' },
+  'Not assessed': { text: 'text-[#5B5478]', bg: 'bg-[#F9F8FD]', border: 'border-[#E2DFF0]' },
+}
+
+function bandColors(band: string) {
+  return BAND_COLORS[band] ?? BAND_COLORS['Not assessed']
+}
+
+const TRUST_BAND_OPTIONS = ['High', 'Medium', 'Low', 'Needs review', 'Not assessed'] as const
+type TrustBandOption = typeof TRUST_BAND_OPTIONS[number]
 
 // ── Error categorisation ──────────────────────────────────────────────────────
 
@@ -202,7 +228,7 @@ function friendlyPortalStatus(
 // ── Explanation builders ──────────────────────────────────────────────────────
 
 function explainFinancialHealth(sd: Record<string, unknown>, score: number): Step[] {
-  const steps: Step[] = [{ text: 'Started at 100.', type: 'base' }]
+  const steps: Step[] = []
 
   // Was data successfully fetched?
   if (sd.error) {
@@ -216,9 +242,9 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
   }
 
   const status = sd.company_status as string | undefined
-  // Only show the status deduction if data was actually fetched (not the 'unknown' fallback from no CH number)
+  // Only show the status finding if data was actually fetched (not the 'unknown' fallback from no CH number)
   if (status && status !== 'active' && status !== 'unknown') {
-    steps.push({ text: `Company status is "${status}" (not active): −60`, type: 'deduction' })
+    steps.push({ text: `Company status is "${status}" (not active).`, type: 'deduction' })
   } else if (status === 'unknown' && !sd.error) {
     steps.push({ text: 'No Companies House number was provided — company status could not be checked.', type: 'info' })
   } else if (status === 'active') {
@@ -227,11 +253,11 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
 
   const acc = sd.accounts as { overdue?: boolean; next_due?: string } | undefined
   if (acc?.overdue) {
-    steps.push({ text: 'Annual accounts are overdue: −40', type: 'deduction' })
+    steps.push({ text: 'Annual accounts are overdue.', type: 'deduction' })
   } else if (acc?.next_due) {
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 18)
     if (new Date(acc.next_due) < cutoff) {
-      steps.push({ text: `No accounts filed in the last 18 months (next due: ${acc.next_due}): −30`, type: 'deduction' })
+      steps.push({ text: `No accounts filed in the last 18 months (next due: ${acc.next_due}).`, type: 'deduction' })
     } else {
       steps.push({ text: `Annual accounts next due: ${acc.next_due}. Up to date.`, type: 'positive' })
     }
@@ -241,7 +267,7 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
 
   const cs = sd.confirmation_statement as { overdue?: boolean; next_due?: string } | undefined
   if (cs?.overdue) {
-    steps.push({ text: 'Confirmation statement is overdue: −20', type: 'deduction' })
+    steps.push({ text: 'Confirmation statement is overdue.', type: 'deduction' })
   } else if (cs?.next_due) {
     steps.push({ text: `Confirmation statement next due: ${cs.next_due}. Up to date.`, type: 'positive' })
   }
@@ -252,7 +278,7 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
 
   if (gc?.status === 'checked') {
     if (gc.going_concern) {
-      steps.push({ text: `Going concern warning detected in accounts (AI confidence: ${gc.confidence}): −30`, type: 'deduction' })
+      steps.push({ text: `Going concern warning detected in accounts (AI confidence: ${gc.confidence}).`, type: 'deduction' })
       if (gc.summary) steps.push({ text: `AI note: "${gc.summary}"`, type: 'warning' })
     } else {
       steps.push({ text: 'No going concern warning found in the latest filing text.', type: 'positive' })
@@ -265,13 +291,12 @@ function explainFinancialHealth(sd: Record<string, unknown>, score: number): Ste
     })
   } else if (gc?.status === 'summary_unavailable') {
     steps.push({
-      text: 'AI going concern analysis was temporarily unavailable and was skipped. No deduction was applied.',
+      text: 'AI going concern analysis was temporarily unavailable and was skipped.',
       type: 'info',
       action: 'Review the auditor\'s report in the latest accounts directly on Companies House.',
     })
   }
 
-  steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
@@ -280,7 +305,7 @@ function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[
   if (sd.enabled === false) {
     return [
       {
-        text: 'Breach history checking via Have I Been Pwned is not configured for this deployment. A neutral score of 75 was applied.',
+        text: 'Breach history checking via Have I Been Pwned is not configured for this deployment. This dimension is shown as Not assessed — it does not indicate the vendor is clean.',
         type: 'info',
         action: 'Ask your administrator to enable HIBP integration, or check the vendor domain manually at haveibeenpwned.com.',
       },
@@ -298,31 +323,31 @@ function explainBreachHistory(sd: Record<string, unknown>, score: number): Step[
 
     return [
       {
-        text: `Breach data could not be retrieved. ${reason} A neutral score of 75 was applied — this does not indicate the vendor is clean.`,
+        text: `Breach data could not be retrieved. ${reason} This dimension is shown as Not assessed — it does not indicate the vendor is clean.`,
         type: 'warning',
         action,
       },
     ]
   }
 
-  const steps: Step[] = [{ text: 'Started at 100.', type: 'base' }]
+  const steps: Step[] = []
   const breaches = (sd.breaches as Array<{ Name: string; BreachDate: string; DataClasses?: string[] }>) ?? []
   const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 24)
 
   if (breaches.length === 0) {
     steps.push({ text: 'No breaches found on the vendor\'s domain.', type: 'positive' })
   } else {
+    steps.push({ text: `${breaches.length} breach${breaches.length !== 1 ? 'es' : ''} found. Fides cannot assess severity or remediation — analyst judgment required.`, type: 'warning' })
     for (const b of breaches) {
       const recent = new Date(b.BreachDate) >= cutoff
       const classes = b.DataClasses?.slice(0, 3).join(', ')
       steps.push({
-        text: `"${b.Name}" (${b.BreachDate})${classes ? ` — data types: ${classes}` : ''}: ${recent ? '−25 (within 24 months)' : '−10 (older than 24 months)'}`,
-        type: 'deduction',
+        text: `"${b.Name}" (${b.BreachDate})${classes ? ` — data types: ${classes}` : ''}${recent ? ' — within 24 months' : ' — older than 24 months'}`,
+        type: 'warning',
       })
     }
   }
 
-  steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
@@ -339,7 +364,7 @@ function explainSanctions(sd: Record<string, unknown>): Step[] {
     }
     return [
       {
-        text: 'The sanctions database could not be queried. A score of 100 was applied but this result is unreliable.',
+        text: 'The sanctions database could not be queried. This result is unreliable — a manual check is required.',
         type: 'warning',
         action,
       },
@@ -361,21 +386,21 @@ function explainSanctions(sd: Record<string, unknown>): Step[] {
   })
 
   if (matches.length === 0) {
-    steps.push({ text: 'No matches found across all lists. Score: 100.', type: 'positive' })
+    steps.push({ text: 'No matches found across all lists.', type: 'positive' })
   } else {
     const confirmed = matches.filter(m => m.level === 'confirmed')
     const possible  = matches.filter(m => m.level === 'possible')
 
     if (confirmed.length) {
       steps.push({
-        text: `${confirmed.length} confirmed sanctions match${confirmed.length !== 1 ? 'es' : ''}. Score forced to 0.`,
+        text: `${confirmed.length} confirmed sanctions match${confirmed.length !== 1 ? 'es' : ''} found.`,
         type: 'deduction',
         action: 'This requires immediate escalation to your compliance team. Do not proceed with this vendor without authorisation.',
       })
     }
     if (possible.length) {
       steps.push({
-        text: `${possible.length} possible sanctions match${possible.length !== 1 ? 'es' : ''} (high name similarity but below confirmation threshold). Score set to 40.`,
+        text: `${possible.length} possible sanctions match${possible.length !== 1 ? 'es' : ''} (high name similarity but below confirmation threshold).`,
         type: 'warning',
         action: 'Review the matched entries below and verify whether they relate to this vendor. Common names may produce false positives.',
       })
@@ -392,6 +417,15 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
   const jurisdiction = sd.jurisdiction as string | undefined
   const status       = sd.status as string | undefined
   const parent       = sd.ultimateParent as { lei?: string; name?: string } | undefined
+  const matchMethod  = sd.matchMethod as string | undefined
+
+  if (matchMethod === 'nameSearch') {
+    steps.push({
+      text: `GLEIF entity matched via name search (no registry number match). Legal name on record: "${legalName ?? 'unknown'}". This may not be the same legal entity as the selected company.`,
+      type: 'warning',
+      action: 'Confirm that the matched entity above is the correct company before relying on jurisdiction and ownership data.',
+    })
+  }
 
   if (sd.error) {
     const cat = categorizeError(sd.error)
@@ -404,7 +438,7 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
       action = 'Search at gleif.org to check LEI registration and jurisdiction manually.'
     }
     steps.push({
-      text: `GLEIF data could not be retrieved. ${ERROR_LABELS[cat]} The ownership score is based on available information only.`,
+      text: `GLEIF data could not be retrieved. ${ERROR_LABELS[cat]}`,
       type: 'warning',
       action,
     })
@@ -427,80 +461,84 @@ function explainOwnership(sd: Record<string, unknown>, score: number): Step[] {
   if (jurisdiction) {
     const jUp = jurisdiction.toUpperCase()
     const jLo = jurisdiction.toLowerCase()
+    let jLabel = jUp
+    try {
+      const name = new Intl.DisplayNames(['en'], { type: 'region' }).of(jUp)
+      if (name && name !== jUp) jLabel = `${name} (${jUp})`
+    } catch { /* use raw code */ }
+
     if (HIGH_JURISDICTIONS.has(jUp)) {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is a high-trust jurisdiction (UK / US / EU / equivalent): score 95.`, type: 'positive' })
+      steps.push({ text: `Jurisdiction: ${jLabel} — a high-trust jurisdiction (UK / US / EU / equivalent).`, type: 'positive' })
     } else if (FATF_BLACK_LIST.some(c => jLo.includes(c.toLowerCase()))) {
       steps.push({
-        text: `Jurisdiction "${jurisdiction}" is on the FATF black list: score 10.`,
+        text: `Jurisdiction: ${jLabel} — on the FATF black list (subject to countermeasures).`,
         type: 'deduction',
-        action: 'Do not proceed without escalating to your compliance team. This jurisdiction is subject to FATF countermeasures.',
+        action: 'Do not proceed without escalating to your compliance team.',
       })
     } else if (FATF_GREY_LIST.some(c => jLo.includes(c.toLowerCase()))) {
       steps.push({
-        text: `Jurisdiction "${jurisdiction}" is on the FATF grey list (enhanced monitoring): score 40.`,
+        text: `Jurisdiction: ${jLabel} — on the FATF grey list (enhanced monitoring).`,
         type: 'warning',
         action: 'Apply enhanced due diligence. Request beneficial ownership documentation and consider senior management approval.',
       })
     } else {
-      steps.push({ text: `Jurisdiction "${jurisdiction}" is a FATF member in good standing: score 65.`, type: 'info' })
+      steps.push({ text: `Jurisdiction: ${jLabel} — FATF member in good standing.`, type: 'info' })
     }
   } else {
     steps.push({
-      text: 'Jurisdiction could not be determined — defaulting to score 40.',
+      text: 'Jurisdiction could not be determined.',
       type: 'info',
       action: 'Check the registered address on Companies House to determine the operating jurisdiction.',
     })
   }
 
   if (parent?.name) steps.push({ text: `Ultimate parent: ${parent.name}${parent.lei ? ` (LEI: ${parent.lei})` : ''}`, type: 'info' })
-  steps.push({ text: `Final score: ${score}`, type: 'base' })
   return steps
 }
 
 function explainTrustCerts(sd: Record<string, unknown>, score: number): Step[] {
-  const certs  = (sd.certs_found as Array<{ certType: string; source: string; expiryDate?: string }>) ?? []
+  const certs  = (sd.certs_found as Array<{ certType: string; source: string; notes?: string }>) ?? []
   const status = sd.status as string | undefined
   const steps: Step[] = []
 
   if (sd.error) {
     steps.push({
-      text: 'An error occurred during portal checks. Results below may be incomplete.',
+      text: 'An error occurred during the trust check. Results below may be incomplete.',
       type: 'warning',
     })
   }
 
-  if (certs.length === 0) {
-    if (status === 'inconclusive') {
+  if (status === 'not_found') {
+    steps.push({
+      text: 'No trust page found at common locations.',
+      type: 'info',
+      action: 'The vendor may host certifications on a custom subdomain or request-only portal. Verify manually or request documentation directly.',
+    })
+  } else if (status === 'inconclusive') {
+    steps.push({
+      text: 'A trust page was found but its certifications could not be read (likely dynamically rendered or access-gated).',
+      type: 'warning',
+      action: 'Visit the trust page directly or request SOC 2, ISO 27001, or Cyber Essentials documentation from the vendor.',
+    })
+  } else {
+    if (certs.length === 0) {
       steps.push({
-        text: 'No certifications were detected after checking all automated sources, but some sources were unreachable. Base score: 25.',
-        type: 'warning',
-        action: 'Request copies of SOC 2, ISO 27001, or Cyber Essentials certificates directly from the vendor.',
+        text: 'Trust page found but no security certifications were listed.',
+        type: 'info',
       })
     } else {
       steps.push({
-        text: 'No certifications were found across any of the automated sources checked. Base score: 15.',
-        type: 'info',
-        action: 'This may mean the vendor does not publish certifications publicly. Request SOC 2, ISO 27001, or Cyber Essentials documentation directly from the vendor.',
-      })
-    }
-  } else {
-    steps.push({
-      text: `${certs.length} certification${certs.length !== 1 ? 's' : ''} found. Score accumulates per certification.`,
-      type: 'base',
-    })
-    const CERT_POINTS: Record<string, number> = {
-      SOC2_TYPE_II: 40, ISO_27001: 30, CYBER_ESSENTIALS_PLUS: 20,
-      CYBER_ESSENTIALS: 15, ISO_22301: 10,
-    }
-    for (const cert of certs) {
-      const pts = CERT_POINTS[cert.certType] ?? 15
-      const label = CERT_LABELS[cert.certType] ?? cert.certType
-      steps.push({
-        text: `${label} via ${cert.source}${cert.expiryDate ? ` (expires ${cert.expiryDate})` : ''}: +${pts}`,
+        text: `${certs.length} security certification${certs.length !== 1 ? 's' : ''} auto-discovered.`,
         type: 'positive',
       })
+      for (const cert of certs) {
+        const label = cert.certType === 'OTHER' && cert.notes
+          ? `${cert.notes} (mapped to Other)`
+          : (CERT_LABELS[cert.certType] ?? cert.certType)
+        steps.push({ text: label, type: 'positive' })
+      }
+      steps.push({ text: 'Auto-discovered certifications are unverified — confirm against actual reports before relying on them.', type: 'info' })
     }
-    steps.push({ text: `Final score: ${score} (capped at 100).`, type: 'base' })
   }
 
   return steps
@@ -517,7 +555,7 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
 
   if (status === 'not_checked') {
     steps.push({
-      text: `No risk-relevant headlines identified. A neutral-positive score has been applied.${articlesCount != null && articlesCount > 0 ? ` (${articlesCount} articles retrieved)` : ''}`,
+      text: `No risk-relevant headlines identified.${articlesCount != null && articlesCount > 0 ? ` (${articlesCount} articles retrieved)` : ''}`,
       type: 'info',
       action: 'Search Google News or industry trade press manually for recent coverage of this vendor.',
     })
@@ -528,20 +566,19 @@ function explainNewsSentiment(sd: Record<string, unknown>): Step[] {
   if (status === 'summary_unavailable') {
     const count = articlesCount ?? 0
     steps.push({
-      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable. A neutral-positive score of 80 was applied.`,
+      text: `${count > 0 ? `${count} headline${count !== 1 ? 's' : ''} were retrieved` : 'Headlines were retrieved'} but AI sentiment analysis was temporarily unavailable.`,
       type: 'info',
-      action: 'Review the news headlines manually and re-run the assessment if you need an AI sentiment score.',
+      action: 'Review the news headlines manually and re-run the assessment if you need an AI sentiment analysis.',
     })
     if (queryNote) steps.push({ text: queryNote, type: 'info' })
     return steps
   }
 
-  const sentimentScores: Record<string, number> = { positive: 90, neutral: 80, mixed: 50, negative: 20 }
   if (sentiment) {
     const t: StepType = sentiment === 'negative' ? 'deduction' : sentiment === 'positive' ? 'positive' : 'info'
     const count = articlesCount != null ? ` (${articlesCount} article${articlesCount !== 1 ? 's' : ''} analysed)` : ''
     steps.push({
-      text: `AI assessed overall news sentiment as "${sentiment}"${count}: score ${sentimentScores[sentiment] ?? 70}.`,
+      text: `AI assessed overall news sentiment as "${sentiment}"${count}.`,
       type: t,
     })
   }
@@ -632,11 +669,23 @@ const EMPTY_CERT_FORM: CertForm = {
 }
 
 export default function DimensionCard({
-  dimension, label, weight, finalScore, rawScore, isOverridden, overrideReason, overriddenAt,
+  dimension, label,
+  suggestedBand, confirmedBand, confirmedBy, confirmedAt, analystNote,
+  isOverridden,
+  finalScore, rawScore, overrideReason, overriddenAt,
   sourceData, fetchedAt, scoreId: _scoreId, assessmentId, canOverride, certifications = [],
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
+
+  // Band confirm/override state
+  const [bandActionOpen, setBandActionOpen] = useState<'confirm' | 'override' | null>(null)
+  const [selectedBand, setSelectedBand] = useState<TrustBandOption>('High')
+  const [bandNote, setBandNote] = useState('')
+  const [bandSaving, setBandSaving] = useState(false)
+  const [bandError, setBandError] = useState<string | null>(null)
+
+  // Legacy numeric override state (old assessments)
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [newScoreVal, setNewScoreVal] = useState(String(finalScore))
   const [overrideReason2, setOverrideReason2] = useState('')
@@ -648,6 +697,41 @@ export default function DimensionCard({
   const [certError, setCertError] = useState<string | null>(null)
   const [certDeleteId, setCertDeleteId] = useState<string | null>(null)
   const [certDeleting, setCertDeleting] = useState(false)
+  const [verifyCertId, setVerifyCertId] = useState<string | null>(null)
+  const [verifyCertForm, setVerifyCertForm] = useState<CertForm>(EMPTY_CERT_FORM)
+  const [verifySaving, setVerifySaving] = useState(false)
+  const [verifyError, setVerifyError] = useState<string | null>(null)
+  // Optimistic relevance state — keyed by cert id
+  const [relevanceOverrides, setRelevanceOverrides] = useState<Record<string, boolean>>({})
+
+  async function handleBandSave() {
+    const isOverride = selectedBand !== suggestedBand
+    if (isOverride && bandNote.trim().length < 10) {
+      setBandError('Please add a note (at least 10 characters) explaining the override.')
+      return
+    }
+    setBandError(null)
+    setBandSaving(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/scores/${dimension}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmedBand: selectedBand, note: bandNote.trim() }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setBandError((data as { error?: string }).error ?? 'Failed to save.')
+        return
+      }
+      setBandActionOpen(null)
+      setBandNote('')
+      router.refresh()
+    } catch {
+      setBandError('Network error. Please try again.')
+    } finally {
+      setBandSaving(false)
+    }
+  }
 
   async function handleOverrideSave() {
     const ns = Number(newScoreVal)
@@ -733,12 +817,76 @@ export default function DimensionCard({
     }
   }
 
+  async function handleVerifyCert(certId: string) {
+    setVerifyError(null)
+    setVerifySaving(true)
+    try {
+      const res = await fetch(`/api/assessments/${assessmentId}/certifications/${certId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          certType: verifyCertForm.certType,
+          issuingBody: verifyCertForm.issuingBody || null,
+          auditPeriodStart: verifyCertForm.auditPeriodStart || null,
+          auditPeriodEnd: verifyCertForm.auditPeriodEnd || null,
+          expiryDate: verifyCertForm.expiryDate || null,
+          notes: verifyCertForm.notes || null,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setVerifyError((data as { error?: string }).error ?? 'Failed to save.')
+        return
+      }
+      setVerifyCertId(null)
+      setVerifyCertForm(EMPTY_CERT_FORM)
+      router.refresh()
+    } catch {
+      setVerifyError('Network error. Please try again.')
+    } finally {
+      setVerifySaving(false)
+    }
+  }
+
+  async function handleRelevanceToggle(certId: string, newValue: boolean) {
+    setRelevanceOverrides(prev => ({ ...prev, [certId]: newValue }))
+    await fetch(`/api/assessments/${assessmentId}/certifications/${certId}/relevance`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isRelevant: newValue }),
+    }).catch(() => {
+      // Revert on failure
+      setRelevanceOverrides(prev => ({ ...prev, [certId]: !newValue }))
+    })
+  }
+
   const sd      = sourceData ?? {}
   const source  = SOURCE_LABELS[dimension] ?? 'Unknown'
   const fetched = fetchedAt ? new Date(fetchedAt).toLocaleString('en-GB') : null
 
   // Lazy-compute steps only when expanded
   const steps = open ? getSteps(dimension, sourceData, finalScore) : []
+
+  // Infer display category from certType + notes (no DB column — frameworks stored as OTHER + notes)
+  function getCertCategory(cert: CertRow): 'security_cert' | 'privacy_framework' | 'other' {
+    if (cert.certType !== 'OTHER') return 'security_cert'
+    const label = (cert.notes ?? '').toUpperCase()
+    if (/\bDORA\b/.test(label) || /\bGDPR\b/.test(label) || /\bCCPA\b/.test(label)) return 'privacy_framework'
+    if (/EU.US DPF|UK.DPF|SWISS.US DPF|\bCBPR\b|\bPRP\b/.test(label)) return 'privacy_framework'
+    if (/NIST\s*CSF/.test(label)) return 'other'
+    return 'security_cert'
+  }
+
+  function certRelevant(cert: CertRow): boolean {
+    return relevanceOverrides[cert.id] ?? cert.isRelevant
+  }
+
+  const autoCerts = certifications.filter(c => c.sourceType !== 'MANUAL')
+  const manualCerts = certifications.filter(c => c.sourceType === 'MANUAL')
+
+  const securityAutoCerts = autoCerts.filter(c => getCertCategory(c) === 'security_cert')
+  const regulatoryAutoCerts = autoCerts.filter(c => getCertCategory(c) === 'privacy_framework')
+  const otherAutoCerts = autoCerts.filter(c => getCertCategory(c) === 'other')
 
   // Sanctions and Trust-certs have extra detail sections
   const sanctionsMatches = dimension === 'SANCTIONS'
@@ -747,9 +895,39 @@ export default function DimensionCard({
   const sanctionsScreened = dimension === 'SANCTIONS'
     ? ((sd.screened as string[]) ?? [])
     : []
-  const scrapeMeta = dimension === 'TRUST_CERTS'
-    ? (sd.scrape_metadata as Record<string, { attempted: boolean; http_status?: number; found: boolean; keywords_found?: string[]; error?: string | null }> | undefined)
+  // New agent result (trust-finder integration)
+  const agentResult = dimension === 'TRUST_CERTS'
+    ? (sd.scrape_metadata as Record<string, unknown> | undefined)?.agent as {
+        state: string; confidence: string; sourceUrl: string | null; sourceTier: string | null
+        platform: string | null; warning: string
+      } | undefined
     : undefined
+
+  // IASME registry check result — shown for both new and legacy assessments
+  type ScrapeMetaEntry = { attempted: boolean; http_status?: number; found: boolean; keywords_found?: string[]; error?: string | null }
+  const iasmeResult = dimension === 'TRUST_CERTS'
+    ? (sd.scrape_metadata as Record<string, ScrapeMetaEntry> | undefined)?.iasme
+    : undefined
+
+  // Legacy portal table (old assessments that pre-date trust-finder)
+  const scrapeMeta = dimension === 'TRUST_CERTS' && !agentResult
+    ? (sd.scrape_metadata as Record<string, ScrapeMetaEntry> | undefined)
+    : undefined
+
+  // ── Render helpers ──────────────────────────────────────────────────────────
+  const isBandMode = suggestedBand != null
+  const isConfirmed = confirmedBand != null
+  const displayBand = confirmedBand ?? suggestedBand
+
+  function BandChip({ band, provisional }: { band: string; provisional?: boolean }) {
+    const c = bandColors(band)
+    return (
+      <span className={`inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-0.5 rounded-full border ${c.text} ${c.bg} ${c.border} ${provisional ? 'opacity-60' : ''}`}>
+        {provisional && <span className="text-[10px] font-normal">Fides suggests:</span>}
+        {band}
+      </span>
+    )
+  }
 
   return (
     <div className="bg-white rounded-xl border border-[#E2DFF0] overflow-hidden">
@@ -759,22 +937,20 @@ export default function DimensionCard({
         className="w-full px-5 pt-4 pb-3 text-left hover:bg-[#F9F8FD] transition-colors"
         aria-expanded={open}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
-            <span className="text-[11px] text-[#8B85A8] bg-[#F9F8FD] border border-[#E2DFF0] px-1.5 py-0.5 rounded-full">
-              {weight}%
-            </span>
-            {isOverridden && (
-              <span className="text-[11px] bg-[#EEEDFE] text-[#5B3FD4] px-2 py-0.5 rounded-full">
-                Manually adjusted
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[14px] font-medium text-[#1A1625]">{label}</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {isBandMode ? (
+              displayBand ? (
+                isConfirmed
+                  ? <BandChip band={displayBand} />
+                  : <BandChip band={displayBand} provisional />
+              ) : null
+            ) : (
+              <span className={`text-[14px] font-medium ${scoreTextColor(finalScore)}`}>
+                {finalScore}<span className="text-[#B8B3CE] font-normal text-[12px]">/100</span>
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-[14px] font-medium ${scoreTextColor(finalScore)}`}>
-              {finalScore}<span className="text-[#B8B3CE] font-normal text-[12px]">/100</span>
-            </span>
             <svg
               className={`w-4 h-4 text-[#B8B3CE] transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -783,21 +959,161 @@ export default function DimensionCard({
             </svg>
           </div>
         </div>
-        {/* Progress bar */}
-        <div className="mt-2.5 h-[3px] w-full bg-[#F9F8FD] rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full ${scoreBarColor(finalScore)}`}
-            style={{ width: `${finalScore}%` }}
-          />
-        </div>
+        {/* Legacy progress bar for old assessments */}
+        {!isBandMode && (
+          <div className="mt-2.5 h-[3px] w-full bg-[#F9F8FD] rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full ${scoreBarColor(finalScore)}`}
+              style={{ width: `${finalScore}%` }}
+            />
+          </div>
+        )}
       </button>
 
       {/* ── Expanded panel ─────────────────────────────────────────────────── */}
       {open && (
         <div className="border-t border-[#E2DFF0] px-5 py-5 space-y-5">
 
-          {/* Adjust score button: only visible in expanded panel */}
-          {open && canOverride && !overrideOpen && (
+          {/* ── Band confirm/override (new assessments) ──────────────────── */}
+          {isBandMode && (
+            <div className="space-y-3">
+              {/* Confirmation state banner */}
+              {isConfirmed ? (
+                <div className={`rounded-xl px-3 py-2.5 border ${isOverridden ? 'bg-[#EEEDFE] border-[#C9C4F8]' : 'bg-[#F9F8FD] border-[#E2DFF0]'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B5478] font-medium">
+                        {suggestedBand === 'Not assessed'
+                          ? 'Band set by analyst (Fides had no data)'
+                          : isOverridden ? 'Band overridden by analyst' : 'Band confirmed by analyst'}
+                      </p>
+                      {isOverridden && suggestedBand && suggestedBand !== 'Not assessed' && (
+                        <p className="text-[12px] text-[#5B5478]">
+                          Fides suggested: <span className="font-medium">{suggestedBand}</span>
+                          {' → '}
+                          <span className="font-medium">{confirmedBand}</span>
+                        </p>
+                      )}
+                      {analystNote && <p className="text-[12px] text-[#5B5478] italic">{analystNote}</p>}
+                      {confirmedBy && confirmedAt && (
+                        <p className="text-[11px] text-[#B8B3CE]">
+                          {confirmedBy} · {new Date(confirmedAt).toLocaleString('en-GB')}
+                        </p>
+                      )}
+                    </div>
+                    {canOverride && bandActionOpen === null && (
+                      <button
+                        onClick={() => {
+                          setSelectedBand((confirmedBand as TrustBandOption) ?? 'High')
+                          setBandNote('')
+                          setBandActionOpen('override')
+                          setBandError(null)
+                        }}
+                        className="flex-shrink-0 text-[12px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                      >
+                        Change
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                canOverride && bandActionOpen === null && (
+                  <div className="flex items-center justify-between">
+                    {suggestedBand === 'Not assessed' ? (
+                      <p className="text-[12px] text-[#8B85A8]">Fides had no data for this dimension — you can set a band based on your own check.</p>
+                    ) : (
+                      <p className="text-[12px] text-[#8B85A8]">Fides suggests: <span className="font-medium text-[#1A1625]">{suggestedBand}</span></p>
+                    )}
+                    <div className="flex gap-2">
+                      {suggestedBand !== 'Not assessed' && (
+                        <button
+                          onClick={() => {
+                            setSelectedBand((suggestedBand as TrustBandOption) ?? 'High')
+                            setBandNote('')
+                            setBandActionOpen('confirm')
+                            setBandError(null)
+                          }}
+                          className="text-[13px] font-medium text-white bg-[#27500A] hover:bg-[#1e3b07] px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          Confirm
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setSelectedBand('High')
+                          setBandNote('')
+                          setBandActionOpen('override')
+                          setBandError(null)
+                        }}
+                        className="text-[13px] font-medium text-[#5B3FD4] hover:text-[#3C3489] border border-[#E2DFF0] bg-white hover:bg-[#F9F8FD] px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        {suggestedBand === 'Not assessed' ? 'Set band' : 'Override'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Confirm/override form */}
+              {bandActionOpen !== null && (
+                <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3">
+                  <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
+                    {bandActionOpen === 'confirm' ? 'Confirm band' : suggestedBand === 'Not assessed' ? 'Set band' : 'Override band'}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <label className="text-[12px] text-[#5B5478] w-24 flex-shrink-0">Band</label>
+                    <select
+                      value={selectedBand}
+                      onChange={e => setSelectedBand(e.target.value as TrustBandOption)}
+                      className="rounded-lg border border-[#E2DFF0] px-2 py-1 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                    >
+                      {TRUST_BAND_OPTIONS.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[12px] text-[#5B5478] block mb-1">
+                      {suggestedBand === 'Not assessed'
+                        ? 'Note (required — document how you verified this, min 10 chars)'
+                        : selectedBand !== suggestedBand ? 'Note (required when overriding, min 10 chars)' : 'Note (optional)'}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={bandNote}
+                      onChange={e => setBandNote(e.target.value)}
+                      placeholder={suggestedBand === 'Not assessed'
+                        ? 'Describe how you verified this (e.g. checked haveibeenpwned.com manually — no breaches found)…'
+                        : selectedBand !== suggestedBand
+                        ? 'Explain why you are changing the suggested band…'
+                        : 'Optional note…'
+                      }
+                      className="w-full rounded-lg border border-[#E2DFF0] px-2 py-1.5 text-[14px] text-[#1A1625] focus:outline-none focus:ring-1 focus:ring-[#5B3FD4] resize-none bg-white"
+                    />
+                  </div>
+                  {bandError && <p className="text-[12px] text-[#791F1F]">{bandError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleBandSave}
+                      disabled={bandSaving}
+                      className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                    >
+                      {bandSaving ? 'Saving…' : bandActionOpen === 'confirm' ? 'Confirm' : suggestedBand === 'Not assessed' ? 'Set band' : 'Save override'}
+                    </button>
+                    <button
+                      onClick={() => { setBandActionOpen(null); setBandError(null); setBandNote('') }}
+                      className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Legacy adjust score (old assessments) ────────────────────── */}
+          {!isBandMode && open && canOverride && !overrideOpen && (
             <div className="flex justify-end">
               <button
                 onClick={() => { setOverrideOpen(true); setOverrideError(null) }}
@@ -808,8 +1124,7 @@ export default function DimensionCard({
             </div>
           )}
 
-          {/* Override form */}
-          {overrideOpen && (
+          {!isBandMode && overrideOpen && (
             <div className="rounded-xl bg-[#F9F8FD] border border-[#E2DFF0] px-4 py-4 space-y-3">
               <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">Adjust score</p>
               <div className="flex items-center gap-3">
@@ -853,8 +1168,8 @@ export default function DimensionCard({
             </div>
           )}
 
-          {/* Override banner */}
-          {isOverridden && (
+          {/* Legacy override banner */}
+          {!isBandMode && isOverridden && (
             <div className="rounded-xl bg-[#EEEDFE] border border-[#E2DFF0] px-3 py-2.5 space-y-0.5">
               <p className="text-[12px] font-medium text-[#5B3FD4]">Manually adjusted</p>
               <p className="text-[12px] text-[#5B3FD4]">Original system score: {rawScore}</p>
@@ -867,10 +1182,10 @@ export default function DimensionCard({
             </div>
           )}
 
-          {/* Score explanation */}
+          {/* Findings / explanation */}
           <div>
             <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-3">
-              How this score was calculated
+              {isBandMode ? 'Findings' : 'How this score was calculated'}
             </p>
             <ul className="space-y-2">
               {steps.map((step, i) => (
@@ -890,14 +1205,75 @@ export default function DimensionCard({
             </ul>
           </div>
 
-          {/* TRUST_CERTS: portal breakdown table */}
+          {/* TRUST_CERTS: agent result (new trust-finder assessments) */}
+          {agentResult && (
+            <div>
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
+                Trust finder result
+              </p>
+              <div className="rounded-xl border border-[#E2DFF0] overflow-hidden bg-white divide-y divide-[#E2DFF0]">
+                <div className="px-3 py-2.5 flex items-center justify-between text-xs">
+                  <span className="text-[#5B5478] font-medium">State</span>
+                  <span className={`font-medium ${
+                    agentResult.state === 'FOUND_AND_READ' ? 'text-[#3B6D11]' :
+                    agentResult.state === 'NOT_FOUND' ? 'text-[#8B85A8]' : 'text-[#BA7517]'
+                  }`}>
+                    {agentResult.state === 'FOUND_AND_READ' ? 'Found & read' :
+                     agentResult.state === 'FOUND_BUT_UNREADABLE' ? 'Found — unreadable (JS rendered)' :
+                     agentResult.state === 'FOUND_BUT_BLOCKED' ? 'Found — access gated' :
+                     'Not found'}
+                    {agentResult.sourceTier ? ` · ${agentResult.sourceTier}` : ''}
+                  </span>
+                </div>
+                {agentResult.platform && (
+                  <div className="px-3 py-2.5 flex items-center justify-between text-xs">
+                    <span className="text-[#5B5478] font-medium">Platform</span>
+                    <span className="text-[#5B5478] capitalize">{agentResult.platform}</span>
+                  </div>
+                )}
+                {agentResult.sourceUrl && (
+                  <div className="px-3 py-2.5 flex items-center justify-between text-xs gap-4">
+                    <span className="text-[#5B5478] font-medium flex-shrink-0">Source</span>
+                    <a
+                      href={agentResult.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#5B3FD4] hover:text-[#3C3489] truncate text-right"
+                    >
+                      {agentResult.sourceUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+              <p className="text-[12px] text-[#5B5478] mt-2 leading-relaxed">{agentResult.warning}</p>
+            </div>
+          )}
+
+          {/* TRUST_CERTS: IASME registry check (shown alongside trust-finder and in legacy mode) */}
+          {iasmeResult && iasmeResult.attempted && (
+            <div>
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
+                Registry checks
+              </p>
+              <div className="rounded-xl border border-[#E2DFF0] overflow-hidden bg-white">
+                <div className="px-3 py-2.5 flex items-start justify-between text-xs gap-4">
+                  <span className="text-[#5B5478] font-medium flex-shrink-0">IASME Cyber Essentials</span>
+                  <span className={`text-right ${friendlyPortalStatus(iasmeResult, 'iasme').color}`}>
+                    {friendlyPortalStatus(iasmeResult, 'iasme').text}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TRUST_CERTS: legacy portal table (pre-trust-finder assessments) */}
           {scrapeMeta && (
             <div>
               <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-2">
                 Portal check results
               </p>
               <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
-                {Object.entries(scrapeMeta).map(([portal, meta]) => {
+                {Object.entries(scrapeMeta).filter(([portal]) => portal !== 'iasme').map(([portal, meta]) => {
                   const { text, color } = friendlyPortalStatus(meta, portal)
                   return (
                     <div key={portal} className="flex items-start justify-between px-3 py-2 text-xs bg-white">
@@ -973,6 +1349,219 @@ export default function DimensionCard({
             <p className="text-[12px] text-[#8B85A8] leading-relaxed border border-[#E2DFF0] rounded-xl px-3 py-2.5 bg-[#F9F8FD]">
               Automated checks cover known public directories only. Vendors may hold valid certifications on private portals, custom subdomains (e.g. trust.vendor.com), or available on request. Manual verification is recommended for Important and Critical vendors.
             </p>
+          )}
+
+          {/* TRUST_CERTS: certifications & frameworks — three groups */}
+          {dimension === 'TRUST_CERTS' && autoCerts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-[#8B85A8] uppercase tracking-[0.06em] mb-3">
+                Certifications & frameworks
+              </p>
+              <div className="space-y-3">
+                {([
+                  { label: 'Security certifications',          certs: securityAutoCerts },
+                  { label: 'Regulatory & privacy frameworks',  certs: regulatoryAutoCerts },
+                  { label: 'Other frameworks',                 certs: otherAutoCerts },
+                ] as const).map(({ label, certs }) => certs.length === 0 ? null : (
+                  <div key={label}>
+                    <p className="text-[11px] text-[#5B5478] font-medium mb-1.5">{label}</p>
+                    <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
+                      {certs.map(cert => {
+                        const isVerified = cert.verifiedBy != null
+                        const platformLabel = cert.sourceType === 'AUTO_VANTA' ? 'Vanta'
+                          : cert.sourceType === 'AUTO_SAFEBASE' ? 'SafeBase'
+                          : 'Web'
+                        const displayName = cert.certType === 'OTHER' && cert.notes
+                          ? cert.notes
+                          : (CERT_LABELS[cert.certType] ?? cert.certType)
+
+                        return (
+                          <div key={cert.id} className="bg-white">
+                            <div className="px-3 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0 space-y-1">
+                                  <div className="flex items-center flex-wrap gap-2">
+                                    <span className="text-[13px] font-medium text-[#1A1625]">{displayName}</span>
+                                    <span className="text-[11px] bg-[#FEF9EE] text-[#BA7517] border border-[#FAEEDA] px-2 py-0.5 rounded-full">
+                                      Auto-discovered · {platformLabel}
+                                    </span>
+                                    {isVerified && (
+                                      <span className="text-[11px] bg-[#EAF3DE] text-[#27500A] border border-[#EAF3DE] px-2 py-0.5 rounded-full">
+                                        Verified
+                                      </span>
+                                    )}
+                                  </div>
+                                  {cert.issuingBody && (
+                                    <p className="text-[12px] text-[#8B85A8]">{cert.issuingBody}</p>
+                                  )}
+                                  <div className="flex flex-wrap gap-3 text-[12px]">
+                                    {cert.auditPeriodStart || cert.auditPeriodEnd ? (
+                                      <span className="text-[#5B5478]">
+                                        Audit: {cert.auditPeriodStart ? new Date(cert.auditPeriodStart).toLocaleDateString('en-GB') : '—'}
+                                        {' – '}
+                                        {cert.auditPeriodEnd ? new Date(cert.auditPeriodEnd).toLocaleDateString('en-GB') : '—'}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[#B8B3CE]">Audit period: not verified</span>
+                                    )}
+                                    {cert.expiryDate ? (
+                                      <span className="text-[#5B5478]">
+                                        Expires {new Date(cert.expiryDate).toLocaleDateString('en-GB')}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[#B8B3CE]">Expiry: not verified</span>
+                                    )}
+                                  </div>
+                                  {cert.sourceUrl && (
+                                    <a
+                                      href={cert.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[12px] text-[#5B3FD4] hover:text-[#3C3489] block truncate"
+                                    >
+                                      {cert.sourceUrl}
+                                    </a>
+                                  )}
+                                </div>
+                                <div className="flex-shrink-0 flex items-center gap-3">
+                                  <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Include in report">
+                                    <input
+                                      type="checkbox"
+                                      checked={certRelevant(cert)}
+                                      onChange={e => handleRelevanceToggle(cert.id, e.target.checked)}
+                                      className="w-3.5 h-3.5 rounded accent-[#5B3FD4] cursor-pointer"
+                                    />
+                                    <span className="text-[11px] text-[#8B85A8]">Include in report</span>
+                                  </label>
+                                  {canOverride && verifyCertId !== cert.id && (
+                                    <button
+                                      onClick={() => {
+                                        setVerifyCertId(cert.id)
+                                        setVerifyCertForm({
+                                          certType: cert.certType,
+                                          issuingBody: cert.issuingBody ?? '',
+                                          auditPeriodStart: '',
+                                          auditPeriodEnd: '',
+                                          expiryDate: '',
+                                          sourceUrl: cert.sourceUrl ?? '',
+                                          notes: cert.certType === 'OTHER' ? '' : (cert.notes ?? ''),
+                                        })
+                                        setVerifyError(null)
+                                      }}
+                                      className="text-[13px] text-[#5B3FD4] hover:text-[#3C3489] font-medium"
+                                    >
+                                      Verify
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Inline verify form */}
+                            {verifyCertId === cert.id && canOverride && (
+                              <div className="border-t border-[#E2DFF0] bg-[#F9F8FD] px-4 py-4 space-y-3">
+                                <p className="text-[11px] uppercase tracking-[0.06em] text-[#5B3FD4] font-medium">
+                                  Verify — fill in dates from the actual cert report
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="sm:col-span-2">
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">Cert type</label>
+                                    <select
+                                      value={verifyCertForm.certType}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, certType: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    >
+                                      {CERT_TYPE_OPTIONS.map(o => (
+                                        <option key={o.value} value={o.value}>{o.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Issuing body <span className="normal-case text-[#B8B3CE]">(optional)</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. AICPA, BSI, IASME"
+                                      value={verifyCertForm.issuingBody}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, issuingBody: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Expiry date <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={verifyCertForm.expiryDate}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, expiryDate: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Audit period start <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={verifyCertForm.auditPeriodStart}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodStart: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Audit period end <span className="normal-case text-[#B8B3CE]">(from report)</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={verifyCertForm.auditPeriodEnd}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, auditPeriodEnd: e.target.value }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <label className="block text-[11px] uppercase tracking-[0.06em] text-[#8B85A8] mb-1">
+                                      Notes <span className="normal-case text-[#B8B3CE]">(optional)</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={verifyCertForm.notes}
+                                      onChange={e => setVerifyCertForm(p => ({ ...p, notes: e.target.value.slice(0, 500) }))}
+                                      className="w-full rounded-lg border border-[#E2DFF0] px-3 py-2 text-[14px] text-[#1A1625] bg-white focus:outline-none focus:ring-1 focus:ring-[#5B3FD4]"
+                                    />
+                                  </div>
+                                </div>
+                                {verifyError && <p className="text-[12px] text-[#791F1F]">{verifyError}</p>}
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleVerifyCert(cert.id)}
+                                    disabled={verifySaving}
+                                    className="px-3 py-1.5 text-[13px] font-medium bg-[#5B3FD4] text-white rounded-lg hover:bg-[#3C3489] disabled:opacity-50 transition-colors"
+                                  >
+                                    {verifySaving ? 'Saving…' : 'Save as verified'}
+                                  </button>
+                                  <button
+                                    onClick={() => { setVerifyCertId(null); setVerifyCertForm(EMPTY_CERT_FORM); setVerifyError(null) }}
+                                    className="px-3 py-1.5 text-[13px] font-medium text-[#5B3FD4] bg-white border border-[#E2DFF0] rounded-lg hover:bg-[#F9F8FD] transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-[#B8B3CE] mt-2">
+                Band suggestion reflects security certifications only; regulatory frameworks and standards are shown for context.
+              </p>
+            </div>
           )}
 
           {/* Manual certifications (TRUST_CERTS only) */}
@@ -1087,9 +1676,9 @@ export default function DimensionCard({
               )}
 
               {/* Cert rows */}
-              {certifications.length > 0 ? (
+              {manualCerts.length > 0 ? (
                 <div className="divide-y divide-[#E2DFF0] rounded-xl border border-[#E2DFF0] overflow-hidden">
-                  {certifications.map(cert => {
+                  {manualCerts.map(cert => {
                     const isExpiringSoon = cert.expiryDate
                       ? (new Date(cert.expiryDate).getTime() - Date.now()) < 90 * 24 * 60 * 60 * 1000
                       : false
@@ -1129,35 +1718,46 @@ export default function DimensionCard({
                               <p className="text-[12px] text-[#8B85A8]">{cert.notes}</p>
                             )}
                           </div>
-                          {canOverride && (
-                            <div className="flex-shrink-0">
-                              {certDeleteId === cert.id ? (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[12px] text-[#5B5478]">Remove?</span>
+                          <div className="flex-shrink-0 flex items-center gap-3">
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Include in report">
+                              <input
+                                type="checkbox"
+                                checked={certRelevant(cert)}
+                                onChange={e => handleRelevanceToggle(cert.id, e.target.checked)}
+                                className="w-3.5 h-3.5 rounded accent-[#5B3FD4] cursor-pointer"
+                              />
+                              <span className="text-[11px] text-[#8B85A8]">Include in report</span>
+                            </label>
+                            {canOverride && (
+                              <>
+                                {certDeleteId === cert.id ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[12px] text-[#5B5478]">Remove?</span>
+                                    <button
+                                      onClick={() => handleCertDelete(cert.id)}
+                                      disabled={certDeleting}
+                                      className="text-[12px] text-[#791F1F] font-medium hover:text-[#A32D2D] disabled:opacity-50"
+                                    >
+                                      {certDeleting ? 'Removing…' : 'Yes'}
+                                    </button>
+                                    <button
+                                      onClick={() => setCertDeleteId(null)}
+                                      className="text-[12px] text-[#8B85A8] hover:text-[#5B5478]"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
                                   <button
-                                    onClick={() => handleCertDelete(cert.id)}
-                                    disabled={certDeleting}
-                                    className="text-[12px] text-[#791F1F] font-medium hover:text-[#A32D2D] disabled:opacity-50"
+                                    onClick={() => { setCertDeleteId(cert.id); setCertError(null) }}
+                                    className="text-[12px] text-[#B8B3CE] hover:text-[#791F1F] transition-colors"
                                   >
-                                    {certDeleting ? 'Removing…' : 'Yes'}
+                                    Remove
                                   </button>
-                                  <button
-                                    onClick={() => setCertDeleteId(null)}
-                                    className="text-[12px] text-[#8B85A8] hover:text-[#5B5478]"
-                                  >
-                                    No
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => { setCertDeleteId(cert.id); setCertError(null) }}
-                                  className="text-[12px] text-[#B8B3CE] hover:text-[#791F1F] transition-colors"
-                                >
-                                  Remove
-                                </button>
-                              )}
-                            </div>
-                          )}
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )
